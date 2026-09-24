@@ -9,8 +9,7 @@ import {
   ApiError,
   AuthenticationError,
   RateLimitError,
-  ValidationError,
-  NotFoundError
+  ValidationError
 } from "../types/index.js";
 import {
   API_TIMEOUT,
@@ -88,36 +87,47 @@ export class QLabsApiClient {
 
       if (axiosError.response) {
         const status = axiosError.response.status;
-        const data = axiosError.response.data as { message?: string; error?: string };
+        const data = axiosError.response.data as { message?: string; error?: string; code?: string };
+        // Some backends (e.g. the Dialer API) return { success:false, message, code }.
+        // Surface the machine-readable code alongside the human message so callers
+        // (and MCP tool handlers) can react to specific error codes.
+        const codeSuffix = data?.code ? ` (code: ${data.code})` : "";
 
         switch (status) {
           case API_CODES.UNAUTHORIZED:
             return new AuthenticationError(
-              data?.message || data?.error || ERROR_MESSAGES.INVALID_CREDENTIALS
+              (data?.message || data?.error || ERROR_MESSAGES.INVALID_CREDENTIALS) + codeSuffix
             );
 
           case API_CODES.FORBIDDEN:
-            return new AuthenticationError(
-              data?.message || data?.error || "Access forbidden"
+            return new ApiError(
+              status,
+              (data?.message || data?.error || "Access forbidden") + codeSuffix,
+              data
             );
 
           case API_CODES.NOT_FOUND:
-            return new NotFoundError("Resource");
+            return new ApiError(
+              status,
+              (data?.message || data?.error || ERROR_MESSAGES.NOT_FOUND("Resource")) + codeSuffix,
+              data
+            );
 
-          case API_CODES.RATE_LIMIT:
+          case API_CODES.RATE_LIMIT: {
             const retryAfter = axiosError.response.headers["retry-after"];
             return new RateLimitError(retryAfter ? parseInt(retryAfter) : undefined);
+          }
 
           case API_CODES.BAD_REQUEST:
             return new ValidationError(
-              data?.message || data?.error || ERROR_MESSAGES.VALIDATION_ERROR,
+              (data?.message || data?.error || ERROR_MESSAGES.VALIDATION_ERROR) + codeSuffix,
               (data as any)?.errors
             );
 
           default:
             return new ApiError(
               status,
-              data?.message || data?.error || ERROR_MESSAGES.SERVER_ERROR,
+              (data?.message || data?.error || ERROR_MESSAGES.SERVER_ERROR) + codeSuffix,
               data
             );
         }

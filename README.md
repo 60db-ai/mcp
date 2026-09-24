@@ -12,6 +12,8 @@ Model Context Protocol (MCP) server for the 60db Voice AI Platform. This server 
 - **Meeting Management**: Record meetings with AI-generated notes and summaries
 - **Analytics**: Track usage statistics and credit consumption
 - **Billing**: View plans, subscriptions, and invoices
+- **Music**: Generate AI songs from a prompt or lyrics, poll status, download MP3s, browse voices
+- **Dialer**: Manage SIP phone numbers, caller ID, call history, recordings, and billing usage
 
 ## Installation
 
@@ -91,6 +93,28 @@ npm start
 - `60db_get_subscription` - Get current subscription details
 - `60db_list_invoices` - List billing invoices
 - `60db_get_invoice` - Get invoice details
+
+#### Music
+- `sixtydb_music_create_song` - Generate a song from a prompt (simple mode) or full lyrics control (advanced mode); async, free during beta
+- `sixtydb_music_get_song` - Poll a song's status; returns lyrics + signed audio URL once ready
+- `sixtydb_music_list_songs` - List songs with search/status/type/liked filters
+- `sixtydb_music_download_song` - Save a finished song's MP3 to a local path, or get a fresh audio URL
+- `sixtydb_music_list_voices` - Browse catalog + saved voices usable for vocals
+- `sixtydb_music_delete_song` - Move a song to trash
+
+#### Dialer
+- `sixtydb_dialer_get_status` - Get account provisioning status
+- `sixtydb_dialer_search_numbers` - Search numbers available to buy
+- `sixtydb_dialer_list_numbers` - List numbers your workspace owns
+- `sixtydb_dialer_buy_number` - Buy a number (requires `confirm: true`; charges $6.00 now + $6.00/month; requires approved Dialer KYC completed in the 60db app — Dialer → KYC, not via API)
+- `sixtydb_dialer_release_number` - Release a number (requires `confirm: true`; irreversible)
+- `sixtydb_dialer_set_caller_id` - Set the default outbound caller ID
+- `sixtydb_dialer_list_calls` - List call history
+- `sixtydb_dialer_get_call` - Get a single call's detail
+- `sixtydb_dialer_list_recordings` - List call recordings
+- `sixtydb_dialer_get_recording_url` - Get a short-lived (~5 min) recording playback URL
+- `sixtydb_dialer_get_recording_transcript` - Get (or generate) a recording transcript
+- `sixtydb_dialer_get_usage` - Combined billing usage + active number subscriptions
 
 ## Response Formats
 

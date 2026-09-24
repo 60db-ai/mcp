@@ -29,7 +29,24 @@ import {
   NOTE_CONTENT_MAX_LENGTH,
   NOTE_TAGS_MAX_COUNT,
   NOTE_TAG_MAX_LENGTH,
-  MEETING_TITLE_MAX_LENGTH
+  MEETING_TITLE_MAX_LENGTH,
+  MUSIC_PROMPT_MAX_LENGTH,
+  MUSIC_LYRICS_MAX_LENGTH,
+  MUSIC_LYRICS_PROMPT_MAX_LENGTH,
+  MUSIC_NEGATIVE_TAGS_MAX_LENGTH,
+  MUSIC_VOICE_ID_MAX_LENGTH,
+  MUSIC_TARGET_DURATION_MIN,
+  MUSIC_TARGET_DURATION_MAX,
+  MUSIC_SEED_MAX_LENGTH,
+  MUSIC_LIST_VOICES_DEFAULT_LIMIT,
+  MUSIC_LIST_VOICES_MAX_LIMIT,
+  E164_REGEX,
+  DIALER_LOGS_MAX_LIMIT,
+  DIALER_LOGS_DEFAULT_LIMIT,
+  DIALER_RECORDINGS_MAX_LIMIT,
+  DIALER_RECORDINGS_DEFAULT_LIMIT,
+  DIALER_USAGE_MAX_LIMIT,
+  DIALER_USAGE_DEFAULT_LIMIT
 } from "../constants.js";
 
 // ============================================================================
@@ -572,3 +589,165 @@ export const AuthzCheckSchema = z.object({
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
 }).strict();
 export type AuthzCheckParams = z.infer<typeof AuthzCheckSchema>;
+
+// ============================================================================
+// Music (Song) Schemas
+// ============================================================================
+
+export const MusicCreateSongSchema = z.object({
+  prompt: z.string()
+    .min(1, "Prompt is required")
+    .max(MUSIC_PROMPT_MAX_LENGTH, `Prompt must not exceed ${MUSIC_PROMPT_MAX_LENGTH} characters`)
+    .describe("Simple mode: a free-text song description. Advanced mode: the style (genre, mood, instruments, BPM)."),
+  mode: z.enum(["simple", "advanced"]).default("simple")
+    .describe("'simple': lyrics are written for you from the prompt. 'advanced': you control style + lyrics source directly."),
+  lyrics: z.string().max(MUSIC_LYRICS_MAX_LENGTH, `Lyrics must not exceed ${MUSIC_LYRICS_MAX_LENGTH} characters`)
+    .optional()
+    .describe("Your own lyrics; [Verse]/[Chorus] section tags allowed. Advanced mode only — mutually exclusive with lyrics_prompt."),
+  lyrics_prompt: z.string().max(MUSIC_LYRICS_PROMPT_MAX_LENGTH, `Lyrics prompt must not exceed ${MUSIC_LYRICS_PROMPT_MAX_LENGTH} characters`)
+    .optional()
+    .describe("'Write lyrics for me' — the topic/idea. Advanced mode only — mutually exclusive with lyrics."),
+  instrumental: z.boolean().default(false)
+    .describe("If true, no lyrics source is needed — an [Instrumental] tag is sent automatically."),
+  vocal_gender: z.enum(["Male", "Female"]).optional().describe("Preferred vocal gender"),
+  voice_id: z.string().max(MUSIC_VOICE_ID_MAX_LENGTH).optional()
+    .describe("A catalog voice ID or a saved voice ID owned by your workspace — see sixtydb_music_list_voices"),
+  negative_tags: z.string().max(MUSIC_NEGATIVE_TAGS_MAX_LENGTH, `Negative tags must not exceed ${MUSIC_NEGATIVE_TAGS_MAX_LENGTH} characters`)
+    .optional()
+    .describe("Styles to exclude from generation"),
+  target_duration: z.number().int()
+    .min(MUSIC_TARGET_DURATION_MIN)
+    .max(MUSIC_TARGET_DURATION_MAX)
+    .optional()
+    .describe(`Target duration in seconds (${MUSIC_TARGET_DURATION_MIN}-${MUSIC_TARGET_DURATION_MAX}) — treated as a hint by the model`),
+  seed: z.string().regex(/^\d+$/, "Seed must be a digit string").max(MUSIC_SEED_MAX_LENGTH)
+    .optional()
+    .describe("Digit string (send as a string — it's 64-bit) for repeatable results"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type MusicCreateSongParams = z.infer<typeof MusicCreateSongSchema>;
+
+export const MusicGetSongSchema = z.object({
+  song_id: z.string().min(1).describe("Song ID returned from sixtydb_music_create_song or sixtydb_music_list_songs"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type MusicGetSongParams = z.infer<typeof MusicGetSongSchema>;
+
+export const MusicListSongsSchema = z.object({
+  q: z.string().optional().describe("Search over title, prompt and tags"),
+  status: z.enum(["generating", "ready", "failed"]).optional().describe("Filter by processing status"),
+  type: z.enum(["vocal", "instrumental"]).optional().describe("Filter by song type"),
+  liked: z.boolean().optional().describe("Only liked songs"),
+  sort: z.enum(["newest", "oldest"]).default("newest"),
+  ...PaginationSchema.shape
+}).strict();
+export type MusicListSongsParams = z.infer<typeof MusicListSongsSchema>;
+
+export const MusicDownloadSongSchema = z.object({
+  song_id: z.string().min(1).describe("Song ID to download"),
+  output_path: z.string().optional()
+    .describe("Absolute local filesystem path ending in .mp3 to save the audio to. If omitted, returns a fresh signed audio_url instead (never returns inline base64 audio)."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type MusicDownloadSongParams = z.infer<typeof MusicDownloadSongSchema>;
+
+export const MusicListVoicesSchema = z.object({
+  search: z.string().optional().describe("Case-insensitive filter over voice name (applied client-side)"),
+  limit: z.number().int().min(1).max(MUSIC_LIST_VOICES_MAX_LIMIT).default(MUSIC_LIST_VOICES_DEFAULT_LIMIT)
+    .describe("Max voices to return after filtering"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type MusicListVoicesParams = z.infer<typeof MusicListVoicesSchema>;
+
+export const MusicDeleteSongSchema = z.object({
+  song_id: z.string().min(1).describe("Song ID to move to trash"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type MusicDeleteSongParams = z.infer<typeof MusicDeleteSongSchema>;
+
+// ============================================================================
+// Dialer Schemas
+// ============================================================================
+
+const E164Schema = z.string().regex(E164_REGEX, "Must be E.164 format, e.g. +14155551234");
+
+export const DialerStatusSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerStatusParams = z.infer<typeof DialerStatusSchema>;
+
+export const DialerSearchNumbersSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerSearchNumbersParams = z.infer<typeof DialerSearchNumbersSchema>;
+
+export const DialerListNumbersSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerListNumbersParams = z.infer<typeof DialerListNumbersSchema>;
+
+export const DialerBuyNumberSchema = z.object({
+  number: E164Schema.optional().describe("Specific number to buy. Omit to buy the next available number from the shared pool."),
+  assign_for: z.enum(["sip", "indian_number"]).optional()
+    .describe("How the number will be used. 'sip' requires a finished trunk setup in the dashboard."),
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually purchase. Buying charges $6.00 immediately, then $6.00/month, and requires approved dialer KYC completed in the 60db app."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerBuyNumberParams = z.infer<typeof DialerBuyNumberSchema>;
+
+export const DialerReleaseNumberSchema = z.object({
+  number: E164Schema.describe("The E.164 number to release"),
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually release. Releasing gives up the number and cancels its monthly rental — it cannot be undone."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerReleaseNumberParams = z.infer<typeof DialerReleaseNumberSchema>;
+
+export const DialerSetCallerIdSchema = z.object({
+  caller_id: E164Schema.describe("An E.164 number you own to use as the default outbound caller ID"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerSetCallerIdParams = z.infer<typeof DialerSetCallerIdSchema>;
+
+export const DialerListCallsSchema = z.object({
+  limit: z.number().int().min(1).max(DIALER_LOGS_MAX_LIMIT).default(DIALER_LOGS_DEFAULT_LIMIT),
+  offset: z.number().int().min(0).default(0),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerListCallsParams = z.infer<typeof DialerListCallsSchema>;
+
+export const DialerGetCallSchema = z.object({
+  call_id: z.string().min(1).describe("Call ID from sixtydb_dialer_list_calls"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerGetCallParams = z.infer<typeof DialerGetCallSchema>;
+
+export const DialerListRecordingsSchema = z.object({
+  direction: z.enum(["inbound", "outbound"]).optional().describe("Filter by call direction"),
+  status: z.string().optional().describe("Filter by recording status"),
+  e164: E164Schema.optional().describe("Filter by associated phone number"),
+  limit: z.number().int().min(1).max(DIALER_RECORDINGS_MAX_LIMIT).default(DIALER_RECORDINGS_DEFAULT_LIMIT),
+  offset: z.number().int().min(0).default(0),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerListRecordingsParams = z.infer<typeof DialerListRecordingsSchema>;
+
+export const DialerGetRecordingUrlSchema = z.object({
+  recording_id: z.string().min(1).describe("Recording ID"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerGetRecordingUrlParams = z.infer<typeof DialerGetRecordingUrlSchema>;
+
+export const DialerGetRecordingTranscriptSchema = z.object({
+  recording_id: z.string().min(1).describe("Recording ID"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerGetRecordingTranscriptParams = z.infer<typeof DialerGetRecordingTranscriptSchema>;
+
+export const DialerGetUsageSchema = z.object({
+  limit: z.number().int().min(1).max(DIALER_USAGE_MAX_LIMIT).default(DIALER_USAGE_DEFAULT_LIMIT)
+    .describe("Max charge entries to return"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerGetUsageParams = z.infer<typeof DialerGetUsageSchema>;

@@ -25,7 +25,11 @@ qlabs-mcp-server/
 │       ├── workspaces.ts     # Workspace management tools (4 tools)
 │       ├── sixtydb.ts        # 60DB integration tools (7 tools)
 │       ├── meetings.ts       # Meeting and analytics tools (4 tools)
-│       └── billing.ts        # Billing and subscription tools (4 tools)
+│       ├── billing.ts        # Billing and subscription tools (4 tools)
+│       ├── memory.ts         # Memory / RAG tools (9 tools)
+│       ├── authz.ts          # Authorization (Cerbos) tools (2 tools)
+│       ├── music.ts          # AI music generation tools (6 tools)
+│       └── dialer.ts         # Dialer (SIP calling) tools (12 tools)
 ├── dist/                     # Built JavaScript files
 ├── package.json              # Project metadata and dependencies
 ├── tsconfig.json             # TypeScript configuration
@@ -36,7 +40,9 @@ qlabs-mcp-server/
 └── MCP_IMPLEMENTATION_SUMMARY.md  # This file
 ```
 
-## Implemented Tools (28 Total)
+## Implemented Tools (56 registered)
+
+> The server registers **56** tools (see `src/tools/*`). Older entries below still use the legacy `qlabs_` prefix, which is now `sixtydb_`. Entries for `qlabs_list_plans` and `qlabs_get_subscription` are **legacy and no longer registered**.
 
 ### Voice Management (3 tools)
 1. `qlabs_list_voices` - List voices with filtering and pagination
@@ -81,6 +87,44 @@ qlabs-mcp-server/
 26. `qlabs_get_subscription` - Get current subscription
 27. `qlabs_list_invoices` - List billing invoices
 28. `qlabs_get_invoice` - Get invoice details
+
+### Memory / RAG (9 tools)
+29. `sixtydb_memory_ingest` - Store a single memory
+30. `sixtydb_memory_ingest_batch` - Store up to 100 memories
+31. `sixtydb_memory_upload_document` - Extract + ingest a document (91+ formats, OCR)
+32. `sixtydb_memory_search` - Hybrid semantic + keyword search
+33. `sixtydb_memory_context` - Assemble LLM-ready RAG context
+34. `sixtydb_memory_list_collections` - List memory collections
+35. `sixtydb_memory_create_collection` - Create a team/knowledge/hive collection
+36. `sixtydb_memory_get_usage` - Get memory spend breakdown
+37. `sixtydb_memory_get_status` - Poll a memory's ingestion status
+38. `sixtydb_memory_delete` - Soft-delete a memory
+
+### Authorization (2 tools)
+39. `sixtydb_get_permissions` - Get the caller's effective permissions
+40. `sixtydb_check_permission` - Check a specific resource/action permission
+
+### Music (6 tools)
+41. `sixtydb_music_create_song` - Generate a song (async, free during beta)
+42. `sixtydb_music_get_song` - Poll song status; lyrics + signed audio URL once ready
+43. `sixtydb_music_list_songs` - List songs with filters
+44. `sixtydb_music_download_song` - Save MP3 to a local path or get a fresh audio URL
+45. `sixtydb_music_list_voices` - Browse catalog + saved voices
+46. `sixtydb_music_delete_song` - Move a song to trash
+
+### Dialer (12 tools)
+47. `sixtydb_dialer_get_status` - Account provisioning status
+48. `sixtydb_dialer_search_numbers` - Search numbers available to buy
+49. `sixtydb_dialer_list_numbers` - List owned numbers
+50. `sixtydb_dialer_buy_number` - Buy a number (`confirm: true` required; needs approved KYC in the 60db app)
+51. `sixtydb_dialer_release_number` - Release a number (`confirm: true` required)
+52. `sixtydb_dialer_set_caller_id` - Set default outbound caller ID
+53. `sixtydb_dialer_list_calls` - List call history
+54. `sixtydb_dialer_get_call` - Get call detail
+55. `sixtydb_dialer_list_recordings` - List call recordings
+56. `sixtydb_dialer_get_recording_url` - Short-lived recording playback URL
+57. `sixtydb_dialer_get_recording_transcript` - Get/generate a recording transcript
+58. `sixtydb_dialer_get_usage` - Combined billing usage + subscriptions
 
 ## Key Features
 

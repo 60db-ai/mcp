@@ -134,3 +134,24 @@ export const INVOICE_STATUSES = ["paid", "pending", "failed"] as const;
 
 // Output Formats
 export const TTS_OUTPUT_FORMATS = ["mp3", "wav", "ogg"] as const;
+
+// Music (Song) Limits
+export const MUSIC_PROMPT_MAX_LENGTH = 2000;
+export const MUSIC_LYRICS_MAX_LENGTH = 12000;
+export const MUSIC_LYRICS_PROMPT_MAX_LENGTH = 2000;
+export const MUSIC_NEGATIVE_TAGS_MAX_LENGTH = 1000;
+export const MUSIC_VOICE_ID_MAX_LENGTH = 100;
+export const MUSIC_TARGET_DURATION_MIN = 10;
+export const MUSIC_TARGET_DURATION_MAX = 600;
+export const MUSIC_SEED_MAX_LENGTH = 19;
+export const MUSIC_LIST_VOICES_DEFAULT_LIMIT = 50;
+export const MUSIC_LIST_VOICES_MAX_LIMIT = 200;
+
+// Dialer Limits
+export const E164_REGEX = /^\+[1-9]\d{1,14}$/;
+export const DIALER_LOGS_MAX_LIMIT = 200;
+export const DIALER_LOGS_DEFAULT_LIMIT = 50;
+export const DIALER_RECORDINGS_MAX_LIMIT = 200;
+export const DIALER_RECORDINGS_DEFAULT_LIMIT = 25;
+export const DIALER_USAGE_MAX_LIMIT = 200;
+export const DIALER_USAGE_DEFAULT_LIMIT = 50;

@@ -454,6 +454,51 @@ qlabs_list_invoices({ limit: 10 })
 qlabs_get_invoice({ id: "inv_abc123" })
 ```
 
+### Scenario 8: Music Generation Workflow
+
+```javascript
+// 1. Browse voices
+sixtydb_music_list_voices({ search: "Devendra" })
+
+// 2. Create a song (simple mode)
+sixtydb_music_create_song({ prompt: "An upbeat pop song about summer road trips" })
+
+// 3. Poll status until succeeded/failed
+sixtydb_music_get_song({ song_id: "song_abc123" })
+
+// 4. List songs
+sixtydb_music_list_songs({ status: "ready", limit: 10 })
+
+// 5. Download the finished MP3
+sixtydb_music_download_song({
+  song_id: "song_abc123",
+  output_path: "/absolute/path/to/song.mp3"
+})
+```
+
+### Scenario 9: Dialer Workflow (numbers require `confirm: true` to spend money)
+
+```javascript
+// 1. Check provisioning status
+sixtydb_dialer_get_status()
+
+// 2. Search available numbers
+sixtydb_dialer_search_numbers()
+
+// 3. Attempt to buy WITHOUT confirm — returns a cost/KYC warning, does not call the API
+sixtydb_dialer_buy_number({ number: "+14155551234" })
+
+// 4. Buy for real (requires approved KYC in the 60db app, Dialer -> KYC)
+sixtydb_dialer_buy_number({ number: "+14155551234", confirm: true })
+
+// 5. List owned numbers and call history
+sixtydb_dialer_list_numbers()
+sixtydb_dialer_list_calls({ limit: 10 })
+
+// 6. Check billing usage
+sixtydb_dialer_get_usage()
+```
+
 ## Performance Testing
 
 ### Load Testing Script

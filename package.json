@@ -1,7 +1,7 @@
 {
   "name": "60db-mcp-server",
-  "version": "2.0.0",
-  "description": "MCP server for the 60db platform — exposes TTS, STT, voice cloning, meetings, workspaces, billing, memory/RAG, and authorization tools",
+  "version": "2.1.0",
+  "description": "MCP server for the 60db platform — exposes TTS, STT, voice cloning, meetings, workspaces, billing, memory/RAG, authorization, AI music generation, and dialer (SIP calling) tools",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -31,7 +31,9 @@
     "memory",
     "rag",
     "cerbos",
-    "authorization"
+    "authorization",
+    "music",
+    "dialer"
   ],
   "author": "60db",
   "license": "MIT",

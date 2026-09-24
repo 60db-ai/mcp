@@ -4,10 +4,11 @@
  *
  * Model Context Protocol server for the 60db platform.
  * Exposes tools for TTS, STT, voice cloning, meetings, workspaces,
- * billing, memory/RAG, and authorization checks.
+ * billing, memory/RAG, authorization checks, AI music generation,
+ * and dialer (SIP calling) management.
  *
  * @package 60db-mcp-server
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -25,6 +26,8 @@ import { registerMeetingAndAnalyticsTools } from "./tools/meetings.js";
 import { registerBillingTools } from "./tools/billing.js";
 import { registerMemoryTools } from "./tools/memory.js";
 import { registerAuthzTools } from "./tools/authz.js";
+import { registerMusicTools } from "./tools/music.js";
+import { registerDialerTools } from "./tools/dialer.js";
 
 /**
  * Main server initialization
@@ -64,7 +67,7 @@ async function main() {
   // Create MCP server instance
   const server = new McpServer({
     name: "60db-mcp-server",
-    version: "2.0.0"
+    version: "2.1.0"
   });
 
   // Register all tools
@@ -77,6 +80,8 @@ async function main() {
   registerBillingTools(server);
   registerMemoryTools(server);
   registerAuthzTools(server);
+  registerMusicTools(server);
+  registerDialerTools(server);
 
   // Log to stderr (stdio is used for MCP protocol)
   console.error(`60db MCP Server starting...`);
@@ -102,6 +107,8 @@ async function main() {
   console.error("  - Billing: sixtydb_list_invoices, sixtydb_get_invoice");
   console.error("  - Memory & RAG: sixtydb_memory_ingest, sixtydb_memory_ingest_batch, sixtydb_memory_upload_document, sixtydb_memory_search, sixtydb_memory_context, sixtydb_memory_list_collections, sixtydb_memory_create_collection, sixtydb_memory_get_usage, sixtydb_memory_get_status, sixtydb_memory_delete");
   console.error("  - Authorization: sixtydb_get_permissions, sixtydb_check_permission");
+  console.error("  - Music: sixtydb_music_create_song, sixtydb_music_get_song, sixtydb_music_list_songs, sixtydb_music_download_song, sixtydb_music_list_voices, sixtydb_music_delete_song");
+  console.error("  - Dialer: sixtydb_dialer_get_status, sixtydb_dialer_search_numbers, sixtydb_dialer_list_numbers, sixtydb_dialer_buy_number, sixtydb_dialer_release_number, sixtydb_dialer_set_caller_id, sixtydb_dialer_list_calls, sixtydb_dialer_get_call, sixtydb_dialer_list_recordings, sixtydb_dialer_get_recording_url, sixtydb_dialer_get_recording_transcript, sixtydb_dialer_get_usage");
   console.error("");
 }
 

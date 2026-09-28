@@ -1,16 +1,19 @@
 {
   "name": "60db-mcp-server",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "MCP server for the 60db platform — exposes TTS, STT, voice cloning, meetings, workspaces, billing, memory/RAG, authorization, AI music generation, and dialer (SIP calling) tools",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "60db-mcp-server": "dist/index.js",
-    "sixtydb-mcp-server": "dist/index.js"
+    "sixtydb-mcp-server": "dist/index.js",
+    "60db-mcp-http": "dist/http-server.js"
   },
   "scripts": {
     "start": "node dist/index.js",
+    "start:http": "node dist/http-server.js",
     "dev": "tsx watch src/index.ts",
+    "dev:http": "tsx watch src/http-server.ts",
     "build": "tsc",
     "clean": "rm -rf dist",
     "prebuild": "npm run clean",
@@ -39,11 +42,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/60db/mcp.git"
+    "url": "git+https://github.com/60db-ai/mcp.git"
   },
-  "homepage": "https://github.com/60db/mcp#readme",
+  "homepage": "https://60db.ai/mcp",
   "bugs": {
-    "url": "https://github.com/60db/mcp/issues"
+    "url": "https://github.com/60db-ai/mcp/issues"
   },
   "files": [
     "dist/",
@@ -54,12 +57,15 @@
     "tsconfig.json"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.1",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "axios": "^1.7.9",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "form-data": "^4.0.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

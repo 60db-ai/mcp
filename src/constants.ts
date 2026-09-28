@@ -1,9 +1,13 @@
 /**
- * Constants for QLabs MCP Server
+ * Constants for the 60db MCP Server
  */
 
+// Server identity
+export const SERVER_NAME = "60db-mcp-server";
+export const SERVER_VERSION = "2.2.0";
+
 // API Configuration
-export const DEFAULT_API_BASE_URL = "http://localhost:3000";
+export const DEFAULT_API_BASE_URL = "https://api.60db.ai";
 export const API_TIMEOUT = 30000; // 30 seconds
 export const CHARACTER_LIMIT = 25000; // Maximum response size in characters
 

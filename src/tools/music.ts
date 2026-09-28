@@ -86,7 +86,17 @@ function fmtSongDetail(s: any, format: ResponseFormat): string {
 
 // ─ Tool registration ──────────────────────────────────────
 
-export function registerMusicTools(server: McpServer): void {
+export interface MusicToolOptions {
+  /**
+   * Allow writing MP3s to the MCP host's filesystem (`output_path`). True for
+   * stdio; false on the hosted server, where the download tool always returns
+   * the signed `audio_url` instead.
+   */
+  allowLocalFiles?: boolean;
+}
+
+export function registerMusicTools(server: McpServer, options: MusicToolOptions = {}): void {
+  const { allowLocalFiles = true } = options;
   // ── sixtydb_music_create_song ──────────────────────────
   server.registerTool(
     "sixtydb_music_create_song",
@@ -317,7 +327,8 @@ Status flow: \`submitted\` → \`running\` → \`succeeded\` | \`failed\`. Poll 
     },
     async (params: MusicDownloadSongParams) => {
       try {
-        if (!params.output_path) {
+        // Hosted mode never touches the server filesystem: always return the signed URL.
+        if (!params.output_path || !allowLocalFiles) {
           const apiClient = getApiClient();
           const data = await apiClient.get<any>(`/songs/${encodeURIComponent(params.song_id)}`);
           if (!data?.success) {

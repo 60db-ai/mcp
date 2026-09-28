@@ -15,7 +15,31 @@ Model Context Protocol (MCP) server for the 60db Voice AI Platform. This server 
 - **Music**: Generate AI songs from a prompt or lyrics, poll status, download MP3s, browse voices
 - **Dialer**: Manage SIP phone numbers, caller ID, call history, recordings, and billing usage
 
-## Installation
+## Hosted server (recommended)
+
+No install needed. Connect any MCP client to the hosted Streamable HTTP endpoint:
+
+```
+https://mcp.60db.ai/mcp
+```
+
+Authenticate with a 60db API key (`sk_live_...`, created at https://app.60db.ai) as a Bearer token. Setup guides for every client: https://60db.ai/mcp
+
+```bash
+# Claude Code
+claude mcp add --transport http 60db https://mcp.60db.ai/mcp \
+  --header "Authorization: Bearer YOUR_60DB_API_KEY"
+```
+
+```json
+// Cursor (~/.cursor/mcp.json)
+{ "mcpServers": { "60db": { "url": "https://mcp.60db.ai/mcp",
+  "headers": { "Authorization": "Bearer YOUR_60DB_API_KEY" } } } }
+```
+
+Requests without a valid token get `401` with an RFC 9728 `WWW-Authenticate: Bearer resource_metadata=...` challenge (OAuth sign-in is coming).
+
+## Local installation (stdio)
 
 ```bash
 npm install
@@ -28,24 +52,36 @@ Set required environment variables:
 
 ```bash
 # Authentication (required - one of these)
-export X60DB_API_KEY=sk_your_api_key_here
+export SIXTYDB_API_KEY=sk_your_api_key_here
 # OR
-export X60DB_JWT_TOKEN=your_jwt_token_here
+export SIXTYDB_JWT_TOKEN=your_jwt_token_here
 
-# Optional: API base URL (default: http://localhost:3000)
-export X60DB_API_BASE_URL=https://api.60db.ai
+# Optional: API base URL (default: https://api.60db.ai)
+export SIXTYDB_API_BASE_URL=https://api.60db.ai
 ```
+
+Legacy `QLABS_*` variable names are still honored.
 
 ## Usage
 
 ### Start the Server
 
 ```bash
-# Development mode with auto-reload
-npm run dev
+# stdio (Claude Desktop, local clients)
+npm run dev        # development, auto-reload
+npm start          # production
 
-# Production mode
-npm start
+# Streamable HTTP (self-hosting the remote endpoint)
+npm run dev:http   # development
+npm run start:http # production; see ecosystem.config.cjs for pm2
+```
+
+HTTP server env: `PORT` (8787), `HOST` (127.0.0.1), `SIXTYDB_API_BASE_URL`, `PUBLIC_MCP_URL`, `AUTH_SERVER_URL` (OAuth authorization server, empty until enabled), `MCP_RATE_LIMIT_PER_MIN` (120).
+
+Smoke test a running endpoint:
+
+```bash
+MCP_URL=https://mcp.60db.ai/mcp SIXTYDB_API_KEY=sk_live_... node scripts/smoke-test-http-mcp-server.mjs
 ```
 
 ### Available Tools

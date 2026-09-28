@@ -107,7 +107,17 @@ function extractBilling(headers: Record<string, string>) {
 
 // ─ Tool registration ──────────────────────────────────────
 
-export function registerMemoryTools(server: McpServer): void {
+export interface MemoryToolOptions {
+  /**
+   * Allow tools that read the MCP host's local filesystem. True for stdio (the
+   * user's own machine); MUST be false on the hosted server, where it would
+   * expose the server's files to every API-key holder.
+   */
+  allowLocalFiles?: boolean;
+}
+
+export function registerMemoryTools(server: McpServer, options: MemoryToolOptions = {}): void {
+  const { allowLocalFiles = true } = options;
   // ── sixtydb_memory_ingest ──────────────────────────────
   server.registerTool(
     "sixtydb_memory_ingest",
@@ -234,8 +244,8 @@ Use this for importing a list of facts, FAQ entries, or pre-chunked documents. F
     }
   );
 
-  // ── sixtydb_memory_upload_document ─────────────────────
-  server.registerTool(
+  // ── sixtydb_memory_upload_document (local file → memory; stdio only) ──
+  const uploadDocumentTool = server.registerTool(
     "sixtydb_memory_upload_document",
     {
       title: "Upload a document to memory",
@@ -345,6 +355,9 @@ Both fees are automatically refunded on any failure.
       }
     }
   );
+  if (!allowLocalFiles) {
+    uploadDocumentTool.remove();
+  }
 
   // ── sixtydb_memory_search ──────────────────────────────
   server.registerTool(

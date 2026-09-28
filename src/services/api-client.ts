@@ -16,6 +16,7 @@ import {
   ERROR_MESSAGES,
   API_CODES
 } from "../constants.js";
+import { getRequestApiClient } from "./request-context.js";
 
 export class QLabsApiClient {
   private client: AxiosInstance;
@@ -228,6 +229,12 @@ export class QLabsApiClient {
 let apiClientInstance: QLabsApiClient | null = null;
 
 export function getApiClient(config?: ApiClientConfig): QLabsApiClient {
+  // Hosted HTTP mode: prefer the client bound to the current request's token.
+  const requestClient = getRequestApiClient();
+  if (requestClient) {
+    return requestClient;
+  }
+
   if (!apiClientInstance && config) {
     apiClientInstance = new QLabsApiClient(config);
   }

@@ -747,3 +747,135 @@ export const DialerGetUsageSchema = z.object({
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
 }).strict();
 export type DialerGetUsageParams = z.infer<typeof DialerGetUsageSchema>;
+
+// ============================================================================
+// Judge Schemas
+// ============================================================================
+
+/**
+ * A rubric question. The three types ask genuinely different things, so the
+ * shape of `criteria` changes with `type`:
+ *   choice — a map of option name -> description (max 255)
+ *   score  — an ordered ladder of level descriptions, lowest first (max 10)
+ *   noul   — nothing required; optionally what true/false mean
+ */
+const JudgeEntrySchema = z.union([z.string(), z.record(z.any()), z.array(z.any()), z.null()]);
+
+const JudgeChoiceQuestionSchema = z.object({
+  type: z.literal("choice"),
+  instructions: JudgeEntrySchema.optional().describe("The question being asked about the content"),
+  criteria: z.record(JudgeEntrySchema)
+    .describe("Option name -> description. ALWAYS include an 'unknown' option — without an escape hatch the model must pick a wrong label on off-topic content."),
+});
+
+const JudgeScoreQuestionSchema = z.object({
+  type: z.literal("score"),
+  instructions: JudgeEntrySchema.optional(),
+  criteria: z.array(JudgeEntrySchema).min(1).max(10)
+    .describe("Ordered levels, LOWEST first. Max 10. The answer is a probability-weighted position on this ladder (e.g. 1.87), not an index."),
+});
+
+const JudgeNoulQuestionSchema = z.object({
+  type: z.literal("noul"),
+  instructions: JudgeEntrySchema.optional(),
+  criteria: z.object({ true: JudgeEntrySchema.optional(), false: JudgeEntrySchema.optional() })
+    .nullable().optional().describe("Optional descriptions of what true and false mean"),
+});
+
+const JudgeQuestionSchema = z.union([
+  JudgeChoiceQuestionSchema,
+  JudgeScoreQuestionSchema,
+  JudgeNoulQuestionSchema,
+]);
+
+/** z.record() has no .min()/.max(), so the 1..32 question limit is a refinement. */
+const judgeQuestionCount = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.refine(
+    (q: unknown) => {
+      const n = Object.keys((q ?? {}) as Record<string, unknown>).length;
+      return n >= 1 && n <= 32;
+    },
+    { message: "A rubric needs between 1 and 32 questions" },
+  );
+
+export const JudgeEvaluateSchema = z.object({
+  state: z.union([z.string().min(1), z.record(z.any()), z.array(z.any())])
+    .describe("The content every question is asked about — a transcript, ticket, document or any JSON. Each question sees this and nothing else."),
+  questions: judgeQuestionCount(z.record(JudgeQuestionSchema)).optional()
+    .describe("Map of answer key -> question. Max 32. Supply this OR rubric_id, never both."),
+  rubric_id: z.string().uuid().optional()
+    .describe("Run a saved rubric instead of inline questions — see sixtydb_judge_list_rubrics."),
+  model: z.string().optional()
+    .describe("Model name. Omit for the default; see sixtydb_judge_list_models for what this deployment serves."),
+  save: z.boolean().default(true)
+    .describe("false bills the run but keeps it out of history."),
+  label: z.string().max(120).optional().describe("Tag for grouping runs in history"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeEvaluateParams = z.infer<typeof JudgeEvaluateSchema>;
+
+const JudgeLabelMapSchema = z.record(z.string().min(1).max(256));
+
+export const JudgeExtractSchema = z.object({
+  text: z.string().min(1).max(2048)
+    .describe("The conversational turn to classify. Max 2,048 Unicode code points."),
+  schema: z.object({
+    intents: JudgeLabelMapSchema.describe("Label -> description. What the speaker wants."),
+    operations: JudgeLabelMapSchema.describe("Label -> description. What to do about it."),
+    entities: JudgeLabelMapSchema.optional().describe("Label -> description. Values to pull out of the text."),
+    responsePaths: JudgeLabelMapSchema.optional()
+      .describe("Label -> description. How the agent should reply. Supplying this selects the v2 model."),
+  }).describe("The label schema. Descriptions are what the model reads — vague descriptions give vague answers. The required 'unknown' label is added server-side if you omit it."),
+  profile: z.enum(["generic", "medical"]).optional(),
+  budget_ms: z.number().int().min(1).max(30000).optional()
+    .describe("Total request budget in milliseconds"),
+  save: z.boolean().default(true),
+  label: z.string().max(120).optional(),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeExtractParams = z.infer<typeof JudgeExtractSchema>;
+
+export const JudgeCreateRubricSchema = z.object({
+  name: z.string().min(1).max(120).describe("Unique per workspace"),
+  questions: judgeQuestionCount(z.record(JudgeQuestionSchema)),
+  description: z.string().max(2000).optional(),
+  model: z.string().optional(),
+  shared: z.boolean().default(false)
+    .describe("Publish to the whole workspace. Owner/admin only — a member gets 403."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeCreateRubricParams = z.infer<typeof JudgeCreateRubricSchema>;
+
+export const JudgeRubricIdSchema = z.object({
+  rubric_id: z.string().uuid().describe("Rubric ID from sixtydb_judge_list_rubrics"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeRubricIdParams = z.infer<typeof JudgeRubricIdSchema>;
+
+export const JudgeListRunsSchema = z.object({
+  needs_review: z.boolean().default(false)
+    .describe("Only runs the judge was under 85% sure about — the upstream's own escalation line, and the queue worth a human's attention."),
+  kind: z.enum(["evaluate", "extract"]).optional(),
+  rubric_id: z.string().uuid().optional().describe("Only runs of this rubric"),
+  limit: z.number().int().min(1).max(100).default(25),
+  offset: z.number().int().min(0).default(0),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeListRunsParams = z.infer<typeof JudgeListRunsSchema>;
+
+export const JudgeRunIdSchema = z.object({
+  run_id: z.string().uuid().describe("Run ID from sixtydb_judge_list_runs"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeRunIdParams = z.infer<typeof JudgeRunIdSchema>;
+
+export const JudgeUsageSchema = z.object({
+  period: z.enum(["current_month", "last_30_days", "all_time"]).default("current_month"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeUsageParams = z.infer<typeof JudgeUsageSchema>;
+
+export const JudgeSimpleSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type JudgeSimpleParams = z.infer<typeof JudgeSimpleSchema>;

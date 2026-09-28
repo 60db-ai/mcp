@@ -14,6 +14,7 @@ import { register60DBTools } from "./tools/sixtydb.js";
 import { registerMeetingAndAnalyticsTools } from "./tools/meetings.js";
 import { registerBillingTools } from "./tools/billing.js";
 import { registerMemoryTools } from "./tools/memory.js";
+import { registerJudgeTools } from "./tools/judge.js";
 import { registerAuthzTools } from "./tools/authz.js";
 import { registerMusicTools } from "./tools/music.js";
 import { registerDialerTools } from "./tools/dialer.js";
@@ -41,6 +42,7 @@ export function createSixtydbMcpServer(options: CreateServerOptions = {}): McpSe
   registerMeetingAndAnalyticsTools(server);
   registerBillingTools(server);
   registerMemoryTools(server, { allowLocalFiles });
+  registerJudgeTools(server);
   registerAuthzTools(server);
   registerMusicTools(server, { allowLocalFiles });
   registerDialerTools(server);

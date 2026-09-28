@@ -19,7 +19,6 @@ import {
   VOICE_NAME_MAX_LENGTH,
   WORKSPACE_NAME_MIN_LENGTH,
   WORKSPACE_NAME_MAX_LENGTH,
-  WORKSPACE_DESC_MAX_LENGTH,
   DICTIONARY_PHRASE_MAX_LENGTH,
   DICTIONARY_REPLACEMENT_MAX_LENGTH,
   SNIPPET_TITLE_MAX_LENGTH,
@@ -27,7 +26,6 @@ import {
   SNIPPET_CATEGORY_MAX_LENGTH,
   NOTE_TITLE_MAX_LENGTH,
   NOTE_CONTENT_MAX_LENGTH,
-  NOTE_TAGS_MAX_COUNT,
   NOTE_TAG_MAX_LENGTH,
   MEETING_TITLE_MAX_LENGTH,
   MUSIC_PROMPT_MAX_LENGTH,
@@ -79,19 +77,15 @@ export type PaginationParams = z.infer<typeof PaginationSchema>;
 // ============================================================================
 
 export const VoiceListSchema = z.object({
-  workspace_id: z.string().optional().describe("Filter by workspace ID"),
-  language: z.string().optional().describe("Filter by language code (e.g., 'en-US')"),
-  dialect: z.string().optional().describe("Filter by dialect"),
-  is_public: z.boolean().optional().describe("Filter public/private voices"),
-  is_clone: z.boolean().optional().describe("Filter cloned/standard voices"),
-  search: z.string().optional().describe("Search term for voice names"),
+  is_clone: z.boolean().optional().describe("true = only your cloned/professional voices, false = only the shared built-in catalog. Omit to see both."),
+  search: z.string().optional().describe("Case-insensitive substring match on voice name (applied client-side — the API has no server-side search)"),
   ...PaginationSchema.shape
 }).strict();
 
 export type VoiceListParams = z.infer<typeof VoiceListSchema>;
 
 export const VoiceGetSchema = z.object({
-  id: z.string().describe("Voice ID to retrieve"),
+  id: z.string().describe("Voice ID (the `voice_id` returned by sixtydb_list_voices) to retrieve"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -104,9 +98,11 @@ export const VoiceCreateSchema = z.object({
     .min(VOICE_NAME_MIN_LENGTH, "Voice name is required")
     .max(VOICE_NAME_MAX_LENGTH, `Voice name must not exceed ${VOICE_NAME_MAX_LENGTH} characters`)
     .describe("Name for the cloned voice"),
-  sample_audio_url: z.string().url().describe("URL to sample audio for voice cloning"),
-  language: z.string().optional().describe("Language code (e.g., 'en-US')"),
+  sample_audio_url: z.string().url().describe("Public URL to a sample audio recording (downloaded server-side and re-uploaded to the API — mp3/wav/m4a/flac/ogg, under 25MB (the API itself allows up to 200MB, but this tool caps the download at 25MB), 10-30s of clear speech recommended)"),
+  language: z.string().optional().describe("Language code (e.g., 'en', 'hi')"),
   dialect: z.string().optional().describe("Dialect variant"),
+  gender: z.string().optional().describe("Voice gender (e.g., 'male', 'female')"),
+  description: z.string().optional().describe("Short description of the voice"),
   is_public: z.boolean().default(false).describe("Make voice publicly available"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
@@ -140,7 +136,7 @@ export const TTSSynthesizeSchema = z.object({
     .max(TTS_MAX_SIMILARITY, `Similarity must not exceed ${TTS_MAX_SIMILARITY}`)
     .optional()
     .describe("Voice similarity 0-100 (default 75)"),
-  output_format: z.enum(["mp3", "wav", "ogg"]).optional().describe("Audio output format"),
+  output_format: z.enum(["mp3", "wav", "ogg"]).optional().describe("Audio output format (default 'wav' — the only encoding confirmed supported by the backend; 'mp3'/'ogg' are passed through best-effort)"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -228,7 +224,7 @@ export const WorkspaceListSchema = z.object({
 export type WorkspaceListParams = z.infer<typeof WorkspaceListSchema>;
 
 export const WorkspaceGetSchema = z.object({
-  id: z.string().describe("Workspace ID"),
+  id: z.string().describe("Workspace ID (numeric id or hash_id, as returned by sixtydb_list_workspaces)"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -241,10 +237,6 @@ export const WorkspaceCreateSchema = z.object({
     .min(WORKSPACE_NAME_MIN_LENGTH, "Workspace name is required")
     .max(WORKSPACE_NAME_MAX_LENGTH, `Workspace name must not exceed ${WORKSPACE_NAME_MAX_LENGTH} characters`)
     .describe("Name for the workspace"),
-  description: z.string()
-    .max(WORKSPACE_DESC_MAX_LENGTH, `Description must not exceed ${WORKSPACE_DESC_MAX_LENGTH} characters`)
-    .optional()
-    .describe("Workspace description"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -267,24 +259,24 @@ export type WorkspaceMembersParams = z.infer<typeof WorkspaceMembersSchema>;
 
 export const DictionaryListSchema = z.object({
   scope: z.enum(["personal", "team", "all"]).default("all").describe("Filter by scope"),
-  voice_id: z.string().optional().describe("Filter by voice ID"),
-  search: z.string().optional().describe("Search term for phrases"),
-  ...PaginationSchema.shape
+  response_format: ResponseFormatSchema
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format")
 }).strict();
 
 export type DictionaryListParams = z.infer<typeof DictionaryListSchema>;
 
 export const DictionaryAddSchema = z.object({
-  phrase: z.string()
-    .min(1, "Phrase is required")
-    .max(DICTIONARY_PHRASE_MAX_LENGTH, `Phrase must not exceed ${DICTIONARY_PHRASE_MAX_LENGTH} characters`)
-    .describe("Phrase to replace"),
+  term: z.string()
+    .min(1, "Term is required")
+    .max(DICTIONARY_PHRASE_MAX_LENGTH, `Term must not exceed ${DICTIONARY_PHRASE_MAX_LENGTH} characters`)
+    .describe("Term/phrase to replace"),
   replacement: z.string()
     .min(1, "Replacement is required")
     .max(DICTIONARY_REPLACEMENT_MAX_LENGTH, `Replacement must not exceed ${DICTIONARY_REPLACEMENT_MAX_LENGTH} characters`)
     .describe("Replacement text"),
+  tag: z.string().max(SNIPPET_CATEGORY_MAX_LENGTH).optional().describe("Optional label for the entry"),
   scope: z.enum(["personal", "team"]).default("personal").describe("Entry scope"),
-  voice_id: z.string().optional().describe("Apply to specific voice only"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -293,9 +285,10 @@ export const DictionaryAddSchema = z.object({
 export type DictionaryAddParams = z.infer<typeof DictionaryAddSchema>;
 
 export const SnippetsListSchema = z.object({
-  category: z.string().optional().describe("Filter by category"),
-  search: z.string().optional().describe("Search term for titles/content"),
-  ...PaginationSchema.shape
+  scope: z.enum(["personal", "team", "all"]).default("all").describe("Filter by scope"),
+  response_format: ResponseFormatSchema
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format")
 }).strict();
 
 export type SnippetsListParams = z.infer<typeof SnippetsListSchema>;
@@ -309,10 +302,11 @@ export const SnippetAddSchema = z.object({
     .min(1, "Content is required")
     .max(SNIPPET_CONTENT_MAX_LENGTH, `Content must not exceed ${SNIPPET_CONTENT_MAX_LENGTH} characters`)
     .describe("Snippet content"),
-  category: z.string()
-    .max(SNIPPET_CATEGORY_MAX_LENGTH, `Category must not exceed ${SNIPPET_CATEGORY_MAX_LENGTH} characters`)
+  tag: z.string()
+    .max(SNIPPET_CATEGORY_MAX_LENGTH, `Tag must not exceed ${SNIPPET_CATEGORY_MAX_LENGTH} characters`)
     .optional()
-    .describe("Snippet category"),
+    .describe("Snippet tag/category"),
+  scope: z.enum(["personal", "team"]).default("personal").describe("Snippet scope"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -321,8 +315,6 @@ export const SnippetAddSchema = z.object({
 export type SnippetAddParams = z.infer<typeof SnippetAddSchema>;
 
 export const NotesListSchema = z.object({
-  tags: z.array(z.string()).optional().describe("Filter by tags"),
-  search: z.string().optional().describe("Search term for titles/content"),
   ...PaginationSchema.shape
 }).strict();
 
@@ -337,10 +329,10 @@ export const NoteAddSchema = z.object({
     .min(1, "Content is required")
     .max(NOTE_CONTENT_MAX_LENGTH, `Content must not exceed ${NOTE_CONTENT_MAX_LENGTH} characters`)
     .describe("Note content"),
-  tags: z.array(z.string().max(NOTE_TAG_MAX_LENGTH))
-    .max(NOTE_TAGS_MAX_COUNT, `Maximum ${NOTE_TAGS_MAX_COUNT} tags allowed`)
+  tag: z.string()
+    .max(NOTE_TAG_MAX_LENGTH, `Tag must not exceed ${NOTE_TAG_MAX_LENGTH} characters`)
     .optional()
-    .describe("Note tags"),
+    .describe("Optional single tag for the note"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -362,13 +354,14 @@ export type NoteGetParams = z.infer<typeof NoteGetSchema>;
 // ============================================================================
 
 export const MeetingsListSchema = z.object({
-  status: z.enum(["recording", "uploading", "processing", "completed", "failed"])
+  status: z.enum(["recording", "processing", "completed"])
     .optional()
     .describe("Filter by status"),
-  search: z.string().optional().describe("Search term for titles"),
-  from_date: z.string().datetime().optional().describe("Filter by start date (ISO 8601)"),
-  to_date: z.string().datetime().optional().describe("Filter by end date (ISO 8601)"),
-  ...PaginationSchema.shape
+  page: z.number().int().min(1).default(1).describe("Page number (1-based)"),
+  limit: z.number().int().min(1).max(100).default(20).describe("Results per page (max 100)"),
+  response_format: ResponseFormatSchema
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format")
 }).strict();
 
 export type MeetingsListParams = z.infer<typeof MeetingsListSchema>;
@@ -387,6 +380,12 @@ export const MeetingCreateSchema = z.object({
     .min(1, "Title is required")
     .max(MEETING_TITLE_MAX_LENGTH, `Title must not exceed ${MEETING_TITLE_MAX_LENGTH} characters`)
     .describe("Meeting title"),
+  platform: z.enum(["zoom", "google-meet", "teams", "webex", "slack", "manual"])
+    .default("manual")
+    .describe("Meeting platform"),
+  start_time: z.string().datetime().optional()
+    .describe("Meeting start time (ISO 8601). Defaults to now."),
+  trigger_type: z.enum(["manual", "auto"]).default("manual").describe("How the meeting was started"),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -420,8 +419,6 @@ export type PlansListParams = z.infer<typeof PlansListSchema>;
 
 export const InvoicesListSchema = z.object({
   status: z.enum(["paid", "pending", "failed"]).optional().describe("Filter by status"),
-  from_date: z.string().datetime().optional().describe("Filter by start date (ISO 8601)"),
-  to_date: z.string().datetime().optional().describe("Filter by end date (ISO 8601)"),
   ...PaginationSchema.shape
 }).strict();
 

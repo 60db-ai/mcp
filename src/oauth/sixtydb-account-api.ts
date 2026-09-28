@@ -113,15 +113,20 @@ export class SixtydbAccountApi {
   ): Promise<void> {
     if (!keepHashId || !name.includes("(MCP connector")) return;
     try {
-      const list = await axios.get(`${this.apiBaseUrl}/developer/api`, { headers: auth, timeout: 10_000 });
+      const opts = { headers: auth, timeout: 10_000, validateStatus: () => true };
+      const list = await axios.get(`${this.apiBaseUrl}/developer/api`, opts);
+      if (list.status !== 200) {
+        console.error(`[oauth] key cleanup: list keys -> ${list.status} ${String(list.data?.message ?? "").slice(0, 120)}`);
+        return;
+      }
       const stale = ((list.data?.data || []) as Array<{ name?: string; hash_id?: string }>).filter(
         (key) => key.name === name && key.hash_id && key.hash_id !== keepHashId
       );
       for (const key of stale) {
-        await axios.delete(`${this.apiBaseUrl}/developer/api/${encodeURIComponent(key.hash_id!)}`, {
-          headers: auth,
-          timeout: 10_000
-        });
+        const del = await axios.delete(`${this.apiBaseUrl}/developer/api/${encodeURIComponent(key.hash_id!)}`, opts);
+        if (del.status >= 300) {
+          console.error(`[oauth] key cleanup: delete -> ${del.status} ${String(del.data?.message ?? "").slice(0, 120)}`);
+        }
       }
       if (stale.length) console.log(`[oauth] replaced ${stale.length} older connector key(s)`);
     } catch (error) {

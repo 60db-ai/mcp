@@ -20,6 +20,9 @@ import {
 } from "./http-auth-middleware.js";
 import { DEFAULT_API_BASE_URL, SERVER_VERSION } from "./constants.js";
 import { setupMcpOAuth } from "./oauth/setup-mcp-oauth.js";
+import { configureAudioStore, serveTemporaryAudio } from "./services/temporary-audio-store.js";
+import os from "node:os";
+import path from "node:path";
 
 // Server-only secrets (MCP_OAUTH_SECRET, GOOGLE_CLIENT_ID) live in an uncommitted .env.
 try {
@@ -61,6 +64,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.get("/", (_req, res) => res.redirect(302, LANDING_PAGE_URL));
 app.get("/health", (_req, res) => res.json({ status: "ok", version: SERVER_VERSION }));
+
+// Generated TTS audio: 24h links under /audio (chat clients can't play inline audio).
+configureAudioStore(process.env.AUDIO_STORE_DIR || path.join(os.tmpdir(), "60db-mcp-audio"), PUBLIC_ORIGIN);
+app.get("/audio/:file", serveTemporaryAudio);
 
 // OAuth 2.1 sign-in for Claude.ai / ChatGPT connectors (see oauth/setup-mcp-oauth.ts).
 const oauth = OAUTH_SECRET

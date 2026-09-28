@@ -37,61 +37,50 @@ export function registerMeetingAndAnalyticsTools(server: McpServer): void {
       title: "List 60DB Meetings",
       description: `List meetings with filtering and pagination.
 
-This tool retrieves all meetings recorded through the 60DB platform, including live recordings, completed meetings, and failed uploads.
+This tool retrieves meetings recorded through the 60DB platform (page-based pagination, not offset-based). There is no title search or date-range filter on this endpoint.
 
 **Parameters:**
-- status ('recording' | 'uploading' | 'processing' | 'completed' | 'failed', optional): Filter by meeting status
-- search (string, optional): Search term for meeting titles
-- from_date (string, optional): Filter by start date (ISO 8601 format)
-- to_date (string, optional): Filter by end date (ISO 8601 format)
-- limit (number, optional): Maximum results to return (1-100, default: 20)
-- offset (number, optional): Number of results to skip for pagination (default: 0)
+- status ('recording' | 'processing' | 'completed', optional): Filter by meeting status
+- page (number, optional): Page number, 1-based (default: 1)
+- limit (number, optional): Results per page, max 100 (default: 20)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- List of meetings with status, duration, and AI summaries
-- Shows which meetings are completed vs still processing
-
 For JSON format:
 {
   "total": number,
-  "count": number,
-  "offset": number,
-  "meetings": [             // Array of meeting objects
+  "page": number,
+  "meetings": [             // Array of meeting summaries
     {
       "id": string,
       "title": string,
-      "status": string,      // recording|uploading|processing|completed|failed
-      "duration": number,    // Duration in seconds
-      "transcript": string,  // Full transcript (if completed)
-      "ai_notes": string,    // AI-generated notes (if completed)
-      "ai_summary": string,  // AI-generated summary (if completed)
-      "created_at": string,
-      "updated_at": string
+      "platform": string,
+      "start_time": string,
+      "end_time": string | null,
+      "duration_minutes": number | null,
+      "status": string,      // recording|processing|completed
+      "trigger_type": string,
+      "has_audio": boolean,
+      "has_notes": boolean
     }
   ],
   "has_more": boolean,
-  "next_offset": number
+  "next_page": number
 }
 
 **Meeting Statuses:**
 - **recording**: Currently being recorded
-- **uploading**: Audio is being uploaded
 - **processing**: Transcription is in progress
 - **completed**: Meeting is fully processed
-- **failed**: An error occurred
 
 **Use Cases:**
 - Browse meeting history
-- Find specific meetings by title or date
 - Check processing status
-- Access transcripts and AI notes
+- Find meeting IDs to fetch full transcripts/notes
 
 **Examples:**
 - Recent completed meetings: { "status": "completed", "limit": 10 }
-- Search by title: { "search": "standup" }
-- Date range: { "from_date": "2024-01-01T00:00:00Z", "to_date": "2024-01-31T23:59:59Z" }
+- Next page: { "page": 2 }
 
 **Error Handling:**
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
@@ -109,28 +98,25 @@ For JSON format:
         const apiClient = getApiClient();
 
         const queryParams: Record<string, unknown> = {
-          limit: params.limit,
-          offset: params.offset
+          page: params.page,
+          limit: params.limit
         };
-
         if (params.status) queryParams.status = params.status;
-        if (params.search) queryParams.search = params.search;
-        if (params.from_date) queryParams.from_date = params.from_date;
-        if (params.to_date) queryParams.to_date = params.to_date;
 
-        const data = await apiClient.get<{
-          meetings: unknown[];
-          total: number;
+        // GET /60db/meetings returns { success, data: { meetings, total, page, limit } }.
+        const response = await apiClient.get<{
+          data: { meetings: unknown[]; total: number; page: number; limit: number };
         }>("/60db/meetings", queryParams);
 
+        const data = response.data || { meetings: [], total: 0, page: params.page, limit: params.limit };
         const meetings = data.meetings || [];
-        const total = data.total || meetings.length;
-        const hasMore = params.offset + meetings.length < total;
+        const total = data.total ?? meetings.length;
+        const hasMore = data.page * data.limit < total;
 
         const formatted = formatMeetingList(
           meetings as any,
           total,
-          params.offset,
+          data.page ?? params.page,
           hasMore,
           params.response_format
         );
@@ -161,31 +147,26 @@ For JSON format:
       title: "Get Meeting Details",
       description: `Get detailed information about a specific meeting.
 
-This tool retrieves complete details for a single meeting including the full transcript, AI-generated notes, summary, and audio.
+This tool retrieves complete details for a single meeting including the full transcript chunks, AI-generated notes, and audio URL.
 
 **Parameters:**
 - id (string, required): Meeting ID
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- Complete meeting details
-- Full transcript with speaker identification
-- AI-generated notes and summary
-- Audio link if available
-
 For JSON format:
 {
   "id": string,
   "title": string,
+  "platform": string,
+  "start_time": string,
+  "end_time": string | null,
+  "duration_minutes": number | null,
   "status": string,
-  "duration": number,
-  "transcript": string,      // Full transcript
-  "ai_notes": string,        // AI-generated notes
-  "ai_summary": string,      // AI-generated summary
-  "audio_url": string,       // Audio download URL
-  "created_at": string,
-  "updated_at": string
+  "trigger_type": string,
+  "audio_url": string | null,
+  "transcript": [{ "id": string, "text": string, "is_final": boolean, "confidence": number, "timestamp": string }],
+  "notes": { "id": string, "summary": string, "key_points": string[], "action_items": object[], "decisions": string[], "generated_at": string } | null
 }
 
 **Use Cases:**
@@ -198,13 +179,11 @@ For JSON format:
 - Get meeting details: { "id": "meeting_abc123" }
 
 **AI Features:**
-- **Notes**: Action items and key points
-- **Summary**: High-level meeting overview
-- **Transcript**: Full word-by-word text
+- **notes.summary / notes.key_points / notes.action_items / notes.decisions**: generated after the meeting is stopped (null while still recording)
+- **transcript**: array of timestamped chunks, not a single string
 
 **Error Handling:**
-- Returns "Error: Meeting not found" if ID doesn't exist (404 status)
-- Returns "Error: Processing not complete" if meeting is still being processed`,
+- Returns "Error: Meeting not found" if ID doesn't exist (404 status)`,
       inputSchema: MeetingGetSchema,
       annotations: {
         title: "Get Meeting Details",
@@ -218,9 +197,10 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const meeting = await apiClient.get<unknown>(`/60db/meetings/${params.id}`);
+        // GET /60db/meetings/:id returns { success, data: {...} }.
+        const response = await apiClient.get<{ data: unknown }>(`/60db/meetings/${params.id}`);
 
-        const formatted = formatMeeting(meeting as any, params.response_format);
+        const formatted = formatMeeting(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -246,41 +226,36 @@ For JSON format:
     "sixtydb_create_meeting",
     {
       title: "Create 60DB Meeting",
-      description: `Create a new meeting recording session.
+      description: `Create a new meeting recording session (status starts as "recording").
 
-This tool initializes a new meeting that can be recorded through the 60DB platform. After creation, audio can be uploaded or streamed for transcription.
+**Important:** this only creates the meeting row. Finishing it (uploading the transcript/audio via \`PUT /60db/meetings/:id/stop\`, a multipart endpoint) is not exposed as an MCP tool, so a meeting created here will stay in "recording" status until it is stopped from the 60db app or desktop client.
 
 **Parameters:**
 - title (string, required): Meeting title (max 200 characters)
+- platform ('zoom' | 'google-meet' | 'teams' | 'webex' | 'slack' | 'manual', optional, default 'manual')
+- start_time (string, optional, ISO 8601): Defaults to now
+- trigger_type ('manual' | 'auto', optional, default 'manual')
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- Created meeting details
-- Meeting ID and recording status
-
 For JSON format:
 {
   "id": string,              // New meeting ID
-  "title": string,           // Meeting title
+  "title": string,
+  "platform": string,
+  "start_time": string,
   "status": "recording",     // Initial status
-  "created_at": string       // Creation timestamp
+  "trigger_type": string
 }
 
 **Examples:**
 - Create meeting: { "title": "Weekly Standup" }
 
-**Next Steps:**
-1. Use the returned meeting ID to upload audio
-2. Monitor meeting status until "completed"
-3. Retrieve transcript and AI notes
-
 **Use Cases:**
-- Start recording a meeting
-- Prepare for audio upload
-- Initialize meeting transcription
+- Pre-create a meeting record before recording it in the 60db app
 
 **Error Handling:**
+- Returns "Error: title, platform, start_time, and trigger_type are required" if any are missing
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
       inputSchema: MeetingCreateSchema,
       annotations: {
@@ -296,12 +271,16 @@ For JSON format:
         const apiClient = getApiClient();
 
         const requestBody = {
-          title: params.title
+          title: params.title,
+          platform: params.platform,
+          start_time: params.start_time || new Date().toISOString(),
+          trigger_type: params.trigger_type
         };
 
-        const meeting = await apiClient.post<unknown>("/60db/meetings", requestBody);
+        // POST /60db/meetings returns { success, message, data: {...} }.
+        const response = await apiClient.post<{ data: unknown }>("/60db/meetings", requestBody);
 
-        const formatted = formatMeeting(meeting as any, params.response_format);
+        const formatted = formatMeeting(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,

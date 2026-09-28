@@ -1,10 +1,29 @@
 /**
  * Speech-to-Text (STT) Tools
  * Tools for STT transcription and history
+ *
+ * Backend routes actually used (routes/index.js, mounted at "/" and "/tts"):
+ *  - POST /stt      -> sttController.transcribeAudio
+ *      Requires multipart/form-data with a `file` field (req.files.file) —
+ *      there is NO `audio_url` JSON field on this endpoint. Hosted MCP has
+ *      no local filesystem, so this tool downloads `audio_url` server-side
+ *      and re-uploads the bytes as multipart. Optional form fields:
+ *      language, diarize, context, keywords, languages, return_timestamps,
+ *      min_speakers/max_speakers.
+ *      Response: the raw upstream STT JSON (text, language, segments, ...)
+ *      merged with { has_audio, hash_id } — no `{success,data}` wrapper.
+ *  - GET  /stt/logs -> sttController.getSTTLogs
+ *      Query: page (NOT offset), limit, language, date_from, date_to (NOT
+ *      from_date/to_date). Response: top-level `{ logs, pagination }`.
+ *  - GET  /stt/:id  -> sttController.getSTTDetail. Response: `{ data: row }`
+ *      (a `stt_item` row — field is `transcript`, not `text`).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import axios from "axios";
+import FormData from "form-data";
+import dns from "dns/promises";
+import net from "net";
 import {
   STTTranscribeSchema,
   STTLogsSchema,
@@ -24,6 +43,108 @@ import {
 } from "../services/response-formatter.js";
 import { ResponseFormat } from "../types/index.js";
 
+const STT_EXT_BY_MIME: Record<string, string> = {
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/wave": "wav",
+  "audio/x-wav": "wav",
+  "audio/ogg": "ogg",
+  "audio/webm": "webm",
+  "audio/flac": "flac",
+  "audio/m4a": "m4a",
+  "audio/mp4": "m4a",
+  "video/mp4": "mp4"
+};
+
+// Kept modest (well under the backend's 100MB cap) so a hosted download +
+// re-upload round trip stays within a reasonable tool-call latency budget.
+const STT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+
+const PRIVATE_IPV4_RANGES: Array<[string, number]> = [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 4]
+];
+
+function ipv4ToInt(ip: string): number {
+  return ip.split(".").reduce((acc, octet) => (acc << 8) + (parseInt(octet, 10) & 0xff), 0) >>> 0;
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  const ipInt = ipv4ToInt(ip);
+  return PRIVATE_IPV4_RANGES.some(([base, bits]) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (ipInt & mask) === (ipv4ToInt(base) & mask);
+  });
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === "::1" || lower === "::") return true;
+  if (lower.startsWith("fe80:")) return true; // link-local
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local fc00::/7
+  if (lower.startsWith("::ffff:")) {
+    const mapped = lower.slice("::ffff:".length);
+    if (net.isIPv4(mapped)) return isPrivateIPv4(mapped);
+  }
+  return false;
+}
+
+/**
+ * Basic SSRF guard for user-supplied audio URLs: require https, reject
+ * literal loopback/private/link-local hosts, and resolve the hostname to
+ * reject DNS names that point at internal infrastructure. Best-effort — it
+ * does not pin the resolved IP for the subsequent request, so a
+ * TOCTOU/DNS-rebinding attacker could still slip through; flagged as a
+ * known residual risk (see report).
+ */
+async function assertPublicHttpsUrl(rawUrl: string): Promise<void> {
+  const parsed = new URL(rawUrl);
+  if (parsed.protocol !== "https:") {
+    throw new Error("audio_url must use https://");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new Error("audio_url may not point to a local/internal host");
+  }
+  if (net.isIP(hostname)) {
+    if (net.isIPv4(hostname) && isPrivateIPv4(hostname)) throw new Error("audio_url may not point to a private/internal IP");
+    if (net.isIPv6(hostname) && isPrivateIPv6(hostname)) throw new Error("audio_url may not point to a private/internal IP");
+    return;
+  }
+  const { address } = await dns.lookup(hostname);
+  if (net.isIPv4(address) && isPrivateIPv4(address)) throw new Error("audio_url resolves to a private/internal IP");
+  if (net.isIPv6(address) && isPrivateIPv6(address)) throw new Error("audio_url resolves to a private/internal IP");
+}
+
+/** Download the audio at `url` for re-upload as multipart/form-data. */
+async function downloadAudioFile(url: string): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
+  await assertPublicHttpsUrl(url);
+  const response = await axios.get<ArrayBuffer>(url, {
+    responseType: "arraybuffer",
+    timeout: DOWNLOAD_TIMEOUT_MS,
+    maxRedirects: 3,
+    maxContentLength: STT_MAX_DOWNLOAD_BYTES,
+    maxBodyLength: STT_MAX_DOWNLOAD_BYTES
+  });
+  const contentType = String(response.headers["content-type"] || "audio/mpeg").split(";")[0].trim();
+  const ext = STT_EXT_BY_MIME[contentType] || "mp3";
+  return {
+    buffer: Buffer.from(response.data),
+    filename: `audio.${ext}`,
+    contentType
+  };
+}
+
 /**
  * Register STT tools
  */
@@ -35,15 +156,17 @@ export function registerSTTTools(server: McpServer): void {
       title: "Transcribe Audio",
       description: `Transcribe an audio file to text via \`POST /stt\`. Powered by 60db STT v01 — a non-hallucinating multi-backend speech recognition stack. **Note: This operation requires credits based on audio duration.**
 
+The backend only accepts a file upload (multipart/form-data) — there is no URL field on the API. This tool downloads \`audio_url\` server-side and re-uploads the bytes for you, so you can still just pass a public URL.
+
 **Parameters:**
-- audio_url (string, required): URL to audio file to transcribe (max 25MB; formats: WAV, MP3, M4A, OGG, FLAC, WebM, MP4 audio track)
+- audio_url (string, required): Public URL to audio file to transcribe (max 25MB — the backend itself allows up to 100MB, but this tool caps the download at 25MB to keep hosted latency reasonable; formats: WAV, MP3, M4A, OGG, FLAC, WebM, MP4 audio track)
 - language (string, optional): ISO 639-1 code (e.g. \`en\`, \`hi\`, \`ar\`, \`fr\`). **Omit this field OR pass \`"auto"\`** to enable auto-detection across the 39 supported languages. Specifying a single supported language skips language identification entirely for lowest latency.
 - diarize (boolean, optional): Enable pyannote speaker diarization. When \`true\`, each segment in the response includes a \`speakers\` array with \`SPEAKER_00\`, \`SPEAKER_01\`, … labels. Adds ~50–150 ms of processing latency.
-- context (string, optional): Free-form paragraph describing the session (domain, speakers, jargon) that opens the server-side LLM refinement gate. When supplied, response text is polished for proper nouns, filler removal, and punctuation. Omit to skip refinement. Example: \`"Cricket coaching session. Players: Arjun Mehta, Ishaan Verma. Discussing batting technique."\`. NOTE: the WebSocket \`/v1/stream\` endpoint takes a structured \`{general, text, terms}\` object instead.
+- context (string, optional): Free-form paragraph describing the session (domain, speakers, jargon) that opens the server-side LLM refinement gate (requires a paid plan — ignored with a warning on the Free plan). When supplied, response text is polished for proper nouns, filler removal, and punctuation. Omit to skip refinement. Example: \`"Cricket coaching session. Players: Arjun Mehta, Ishaan Verma. Discussing batting technique."\`.
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Auto-detect:**
-The most reliable way to auto-detect is to **omit the \`language\` field entirely**. Passing the literal string \`"auto"\` is also accepted and treated identically by the server-side shim — it rewrites \`auto\` → omit before forwarding to the backend. Do NOT pass \`"auto"\` directly to the WebSocket streaming endpoint; the WS form requires \`languages: null\`.
+The most reliable way to auto-detect is to **omit the \`language\` field entirely**. Passing the literal string \`"auto"\` is also accepted and treated identically — it is stripped before forwarding to the backend.
 
 **Response shape (JSON):**
 \`\`\`
@@ -71,13 +194,13 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
   "words": array,               // Flat word list across all segments
   "warnings": array,            // Non-fatal warnings (e.g. no_speech_detected)
   "warning_codes": string[],    // Flat list of warning codes for quick checks
-  "language_detection": object  // Internal LID metadata
+  "hash_id": string,            // ID to use with sixtydb_stt_get
+  "has_audio": boolean          // Whether the source audio was archived server-side
 }
 \`\`\`
 
 **Examples:**
 - Auto-detect: \`{ "audio_url": "https://example.com/audio.mp3" }\`
-- Auto-detect (explicit): \`{ "audio_url": "https://example.com/audio.mp3", "language": "auto" }\`
 - Specific language: \`{ "audio_url": "https://example.com/hindi.mp3", "language": "hi" }\`
 - With speaker diarization: \`{ "audio_url": "https://example.com/meeting.mp3", "diarize": true }\`
 
@@ -85,24 +208,15 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
 - **European (25)**: English (\`en\`), Spanish (\`es\`), French (\`fr\`), German (\`de\`), Italian (\`it\`), Portuguese (\`pt\`), Dutch (\`nl\`), Polish (\`pl\`), Russian (\`ru\`), Ukrainian (\`uk\`), Czech (\`cs\`), Swedish (\`sv\`), Bulgarian (\`bg\`), Danish (\`da\`), Greek (\`el\`), Estonian (\`et\`), Finnish (\`fi\`), Croatian (\`hr\`), Hungarian (\`hu\`), Lithuanian (\`lt\`), Latvian (\`lv\`), Maltese (\`mt\`), Romanian (\`ro\`), Slovak (\`sk\`), Slovenian (\`sl\`)
 - **Indic (13, with English code-switching)**: Hindi (\`hi\`), Bengali (\`bn\`), Marathi (\`mr\`), Punjabi (\`pa\`), Gujarati (\`gu\`), Odia (\`or\`), Assamese (\`as\`), Nepali (\`ne\`), Telugu (\`te\`), Kannada (\`kn\`), Tamil (\`ta\`), Malayalam (\`ml\`), Sanskrit (\`sa\`)
 - **Arabic**: MSA (\`ar\`) — dialect tags like \`ar-eg\` are rejected
-- **Unsupported** (return error, no silent aliasing): \`ur\`, \`ja\`, \`ko\`, \`zh\`, \`th\`, \`vi\`, \`id\`, \`tl\`, \`sw\`, \`tr\`, \`fa\`, \`he\`
 
 **Credit Cost:**
-- Billed per second of audio (\`duration_sec\` field)
-- Diarization does not affect cost
-
-**Audio Requirements:**
-- Max file size: 25MB
-- Max duration: 1 hour
-- Supported formats: WAV, MP3, M4A, OGG, FLAC, WebM, MP4 audio track
-- Recommended: 16 kHz+ sample rate
+- Billed per second of audio (\`duration_sec\` field); diarization adds a 30% surcharge
 
 **Error Handling:**
 - Successful request with \`text: ""\` and \`warning_codes: ["no_speech_detected"]\` means the audio contained no speech (silence / music / noise). This is NOT an error — do not retry.
-- Returns "Error: Insufficient credits" if balance is too low
-- Returns "Error: File too large" if audio exceeds 25MB
-- Returns "Error: Unsupported format" for invalid audio formats
-- Returns an \`unsupported_language\` error when the \`language\` field is set to a code not in the supported list (e.g. \`ur\`, \`ja\`, \`ko\`, \`zh\`)`,
+- Returns "Error: ... Insufficient credits" if balance is too low
+- Returns "Error: audio exceeds the 25MB download cap" if the file at audio_url is too large
+- Returns "Error: Invalid file type" for unsupported audio formats`,
       inputSchema: STTTranscribeSchema,
       annotations: {
         title: "Transcribe Audio",
@@ -114,31 +228,34 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
     },
     async (params: STTTranscribeParams) => {
       try {
-        const apiClient = getApiClient();
+        const audio = await downloadAudioFile(params.audio_url);
 
-        // `language: "auto"` is treated as omission — the upstream STT server
-        // rejects "auto" as a literal code. The REST `/stt` route also strips
-        // it server-side; we pre-strip here so the sent payload matches docs.
+        const form = new FormData();
+        form.append("file", audio.buffer, {
+          filename: audio.filename,
+          contentType: audio.contentType
+        });
+
         const explicitLanguage =
           params.language && params.language.toLowerCase() !== "auto"
             ? params.language
             : undefined;
+        if (explicitLanguage) form.append("language", explicitLanguage);
 
-        // `context` is a free-form string on the REST endpoint — trim and
-        // drop when empty so empty input doesn't masquerade as a hint.
-        const contextStr =
-          params.context && params.context.trim() ? params.context.trim() : undefined;
+        if (params.diarize !== undefined) form.append("diarize", String(params.diarize));
 
-        const requestBody = {
-          audio_url: params.audio_url,
-          ...(explicitLanguage && { language: explicitLanguage }),
-          ...(params.diarize !== undefined && { diarize: params.diarize }),
-          ...(contextStr !== undefined && { context: contextStr })
-        };
+        const contextStr = params.context && params.context.trim() ? params.context.trim() : undefined;
+        if (contextStr) form.append("context", contextStr);
 
-        const result = await apiClient.post<unknown>("/stt", requestBody);
+        const axiosInstance = getApiClient().getAxiosInstance();
+        const response = await axiosInstance.post("/stt", form, {
+          headers: form.getHeaders(),
+          timeout: 600_000,
+          maxContentLength: STT_MAX_DOWNLOAD_BYTES,
+          maxBodyLength: STT_MAX_DOWNLOAD_BYTES
+        });
 
-        const formatted = formatSTTLog(result as any, params.response_format);
+        const formatted = formatSTTLog(response.data, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -167,9 +284,7 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
     "sixtydb_stt_logs",
     {
       title: "Get Transcription History",
-      description: `Retrieve STT transcription history with filtering and pagination.
-
-This tool provides a complete history of all transcriptions made through the account, including text previews, duration, language, and credit usage.
+      description: `Retrieve STT transcription history (\`GET /stt/logs\`) with filtering and pagination.
 
 **Parameters:**
 - language (string, optional): Filter by specific language code
@@ -179,46 +294,8 @@ This tool provides a complete history of all transcriptions made through the acc
 - offset (number, optional): Number of results to skip for pagination (default: 0)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
-**Returns:**
-For Markdown format (default):
-- List of transcriptions with details
-- Each entry shows filename, language, duration, and text preview
-
-For JSON format:
-{
-  "total": number,           // Total number of transcriptions
-  "count": number,           // Number in this response
-  "offset": number,          // Current pagination offset
-  "logs": [                  // Array of STT log entries
-    {
-      "id": string,          // Transcription ID
-      "file_name": string,   // Original filename
-      "text": string,        // Full transcript
-      "language": string,    // Language code
-      "duration": number,    // Duration in seconds
-      "credits_used": number,// Credits charged
-      "created_at": string   // Transcription timestamp
-    }
-  ],
-  "has_more": boolean,       // Whether more results exist
-  "next_offset": number      // Next page offset
-}
-
-**Examples:**
-- Recent transcriptions: { "limit": 10 }
-- Filter by language: { "language": "en-US" }
-- Date range: { "from_date": "2024-01-01T00:00:00Z", "to_date": "2024-01-31T23:59:59Z" }
-- Paginate through results: { "offset": 20, "limit": 20 }
-
-**Use Cases:**
-- Track transcription usage and credit spending
-- Find previously transcribed content
-- Analyze language usage patterns
-- Audit transcription history
-
 **Error Handling:**
-- Returns "Error: Authentication required" if API key/JWT is invalid
-- Returns "Error: Invalid date format" for malformed date parameters`,
+- Returns "Error: Authentication required" if the API key is invalid`,
       inputSchema: STTLogsSchema,
       annotations: {
         title: "Get Transcription History",
@@ -232,22 +309,24 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
+        // Backend paginates by `page`, not `offset` — translate.
+        const page = Math.floor(params.offset / params.limit) + 1;
         const queryParams: Record<string, unknown> = {
-          limit: params.limit,
-          offset: params.offset
+          page,
+          limit: params.limit
         };
 
         if (params.language) queryParams.language = params.language;
-        if (params.from_date) queryParams.from_date = params.from_date;
-        if (params.to_date) queryParams.to_date = params.to_date;
+        if (params.from_date) queryParams.date_from = params.from_date;
+        if (params.to_date) queryParams.date_to = params.to_date;
 
         const data = await apiClient.get<{
           logs: unknown[];
-          total: number;
+          pagination: { page: number; limit: number; total: number; pages: number };
         }>("/stt/logs", queryParams);
 
         const logs = data.logs || [];
-        const total = data.total || logs.length;
+        const total = data.pagination?.total ?? logs.length;
         const hasMore = params.offset + logs.length < total;
 
         const formatted = formatSTTLogList(
@@ -285,42 +364,15 @@ For JSON format:
     "sixtydb_stt_get",
     {
       title: "Get Transcription Details",
-      description: `Get detailed information about a specific transcription.
-
-This tool retrieves complete details for a single transcription including the full text, language, duration, and credit usage.
+      description: `Get detailed information about a specific transcription (\`GET /stt/{id}\`).
 
 **Parameters:**
-- id (string, required): STT transcription ID
+- id (string, required): STT transcription ID (the \`hash_id\` from sixtydb_stt_transcribe or sixtydb_stt_logs)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
-
-**Returns:**
-For Markdown format (default):
-- Complete transcription details
-- Shows full text, language, duration, and credits
-
-For JSON format:
-{
-  "id": string,              // Transcription ID
-  "file_name": string,       // Original filename
-  "text": string,            // Full transcript text
-  "language": string,        // Language code
-  "duration": number,        // Duration in seconds
-  "credits_used": number,    // Credits charged
-  "created_at": string       // Transcription timestamp
-}
-
-**Examples:**
-- Get transcription details: { "id": "stt_abc123" }
-
-**Use Cases:**
-- Retrieve full transcript text
-- Review transcription parameters
-- Check credit usage for specific transcription
-- Access metadata
 
 **Error Handling:**
 - Returns "Error: Transcription not found" if ID doesn't exist (404 status)
-- Returns "Error: Authentication required" if API key/JWT is invalid`,
+- Returns "Error: Authentication required" if the API key is invalid`,
       inputSchema: STTGetSchema,
       annotations: {
         title: "Get Transcription Details",
@@ -334,9 +386,9 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const log = await apiClient.get<unknown>(`/stt/${params.id}`);
+        const body = await apiClient.get<{ success: boolean; data?: unknown }>(`/stt/${encodeURIComponent(params.id)}`);
 
-        const formatted = formatSTTLog(log as any, params.response_format);
+        const formatted = formatSTTLog(body.data, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,

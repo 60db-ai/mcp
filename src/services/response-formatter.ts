@@ -3,24 +3,6 @@
  * Handles formatting responses in both JSON and Markdown formats
  */
 
-import {
-  Voice,
-  TTSLog,
-  STTLog,
-  Workspace,
-  WorkspaceMember,
-  HistoryEntry,
-  DictionaryEntry,
-  Snippet,
-  Note,
-  Meeting,
-  UsageStats,
-  VoiceAnalytics,
-  Plan,
-  Subscription,
-  Invoice,
-  PaginatedResponse
-} from "../types/index.js";
 import { ResponseFormat } from "../types/index.js";
 import { CHARACTER_LIMIT } from "../constants.js";
 
@@ -39,18 +21,26 @@ function formatDate(dateString: string): string {
 /**
  * Format duration in seconds to human-readable string
  */
-function formatDuration(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds}s`;
-  } else if (seconds < 3600) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "unknown";
+  const s = Math.round(seconds);
+  if (s < 60) {
+    return `${s}s`;
+  } else if (s < 3600) {
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
     return `${mins}m ${secs}s`;
   } else {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
     return `${hours}h ${mins}m`;
   }
+}
+
+/** Format a USD cost value (the API bills in dollars, not "credits"). */
+function formatCost(usd: unknown): string {
+  const n = typeof usd === "number" ? usd : parseFloat(String(usd));
+  return Number.isFinite(n) ? `$${n.toFixed(6)}` : "unknown";
 }
 
 /**
@@ -96,32 +86,54 @@ export function truncateIfNeeded(
 }
 
 /**
- * Format voice list/response
+ * Format a single voice.
+ *
+ * Real shape (GET /voices/{id} -> data): { voice_id, name, category,
+ * model, labels?, description?, preview_url?, reference_text?, is_native?,
+ * available_for_tiers?, categories? } — plus, for voices this workspace
+ * owns, local enrichment: { access_level, creator_name, workspace_name,
+ * is_public, language, dialect, gender, accent, sample_url, created_at }.
+ * The upstream catalog does NOT expose a `language`/`gender` field on most
+ * built-in voices — only locally-owned rows do.
  */
 export function formatVoice(
-  voice: Voice,
+  voice: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
     return JSON.stringify(voice, null, 2);
   }
 
+  const id = voice?.voice_id ?? voice?.id ?? "unknown";
+  const name = voice?.name ?? "Unnamed voice";
+  const language = voice?.language ?? voice?.labels?.language;
+  const gender = voice?.gender ?? voice?.labels?.gender;
+  const preview = voice?.preview_url ?? voice?.sample_url;
+
   const lines: string[] = [];
-  lines.push(`## ${voice.name} (${voice.id})`);
+  lines.push(`## ${name} (${id})`);
   lines.push("");
-  if (voice.language) lines.push(`- **Language**: ${voice.language}${voice.dialect ? ` (${voice.dialect})` : ""}`);
-  if (voice.gender) lines.push(`- **Gender**: ${voice.gender}`);
-  if (voice.age) lines.push(`- **Age**: ${voice.age}`);
-  lines.push(`- **Type**: ${voice.is_clone ? "Cloned" : "Standard"} ${voice.is_public ? "(Public)" : "(Private)"}`);
-  if (voice.sample_audio_url) lines.push(`- **Preview**: ${voice.sample_audio_url}`);
-  if (voice.created_at) lines.push(`- **Created**: ${formatDate(voice.created_at)}`);
+  if (language) lines.push(`- **Language**: ${language}${voice?.dialect ? ` (${voice.dialect})` : ""}`);
+  if (gender) lines.push(`- **Gender**: ${gender}`);
+  if (voice?.category) lines.push(`- **Category**: ${voice.category}`);
+  if (voice?.model) lines.push(`- **Model**: ${voice.model}`);
+  if (typeof voice?.is_public === "boolean") lines.push(`- **Visibility**: ${voice.is_public ? "Public" : "Private"}`);
+  if (voice?.description) lines.push(`- **Description**: ${voice.description}`);
+  if (preview) lines.push(`- **Preview**: ${preview}`);
+  if (voice?.created_at) lines.push(`- **Created**: ${formatDate(voice.created_at)}`);
   lines.push("");
 
   return lines.join("\n");
 }
 
+/**
+ * Format a voice list. `voices` are the combined + client-filtered array
+ * built by the list tool (each item tagged with `is_clone`); pagination
+ * (total/offset/has_more) is also computed client-side since GET /get-voices
+ * returns the full catalog with no server-side pagination or search.
+ */
 export function formatVoiceList(
-  voices: Voice[],
+  voices: any[],
   total: number,
   offset: number,
   hasMore: boolean,
@@ -140,17 +152,20 @@ export function formatVoiceList(
   }
 
   const lines: string[] = [];
-  lines.push(`# Voices (${total} total)`);
+  lines.push(`# Voices (${total} matching)`);
   lines.push("");
   lines.push(`Showing ${voices.length} voices (offset: ${offset})`);
   lines.push("");
 
   for (const voice of voices) {
-    lines.push(`### ${voice.name} (${voice.id})`);
-    lines.push(`- **Language**: ${voice.language || "N/A"}${voice.dialect ? ` (${voice.dialect})` : ""}`);
-    lines.push(`- **Gender**: ${voice.gender || "N/A"}`);
-    lines.push(`- **Type**: ${voice.is_clone ? "Cloned" : "Standard"} ${voice.is_public ? "(Public)" : "(Private)"}`);
-    if (voice.sample_audio_url) lines.push(`- **Preview**: ${voice.sample_audio_url}`);
+    const id = voice?.voice_id ?? voice?.id ?? "unknown";
+    const language = voice?.language ?? voice?.labels?.language;
+    lines.push(`### ${voice?.name ?? "Unnamed voice"} (${id})`);
+    if (language) lines.push(`- **Language**: ${language}`);
+    if (voice?.category) lines.push(`- **Category**: ${voice.category}`);
+    lines.push(`- **Type**: ${voice?.is_clone ? "Cloned/your voice" : "Built-in catalog"}`);
+    const preview = voice?.preview_url ?? voice?.sample_url;
+    if (preview) lines.push(`- **Preview**: ${preview}`);
     lines.push("");
   }
 
@@ -162,32 +177,52 @@ export function formatVoiceList(
 }
 
 /**
- * Format TTS log/response
+ * Format a single TTS log entry.
+ *
+ * Real shape (GET /tts/{id} -> data, a `tts_logs` row): { id, hash_id,
+ * input_text, characters, duration_seconds, cost_usd, status,
+ * error_message, output_url, created_at, voice_name, voice_language }.
+ * `output_url`/audio is usually null — synthesis audio is streamed back at
+ * generation time and not persisted server-side, so history rows are
+ * text/metadata only.
  */
 export function formatTTSLog(
-  log: TTSLog,
+  log: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
     return JSON.stringify(log, null, 2);
   }
 
+  const id = log?.hash_id ?? log?.id ?? "unknown";
+  const text: string = log?.input_text ?? log?.text ?? "";
+
   const lines: string[] = [];
-  lines.push(`## TTS Generation ${log.id}`);
+  lines.push(`## TTS Generation ${id}`);
   lines.push("");
-  lines.push(`- **Text**: ${log.text.substring(0, 100)}${log.text.length > 100 ? "..." : ""}`);
-  lines.push(`- **Voice**: ${log.voice_name} (${log.voice_id})`);
-  lines.push(`- **Duration**: ${formatDuration(log.duration)}`);
-  lines.push(`- **Credits Used**: ${log.credits_used}`);
-  lines.push(`- **Created**: ${formatDate(log.created_at)}`);
-  if (log.audio_url) lines.push(`- **Audio**: ${log.audio_url}`);
+  lines.push(`- **Text**: ${text.substring(0, 100)}${text.length > 100 ? "..." : ""}`);
+  lines.push(`- **Voice**: ${log?.voice_name ?? log?.voice_id ?? "unknown"}`);
+  lines.push(`- **Status**: ${log?.status ?? "unknown"}`);
+  lines.push(`- **Duration**: ${formatDuration(log?.duration_seconds)}`);
+  lines.push(`- **Cost**: ${formatCost(log?.cost_usd)}`);
+  if (log?.created_at) lines.push(`- **Created**: ${formatDate(log.created_at)}`);
+  if (log?.output_url) {
+    lines.push(`- **Audio**: ${log.output_url}`);
+  } else {
+    lines.push(`- **Audio**: not persisted (audio was only returned at generation time)`);
+  }
+  if (log?.error_message) lines.push(`- **Error**: ${log.error_message}`);
   lines.push("");
 
   return lines.join("\n");
 }
 
+/**
+ * Real shape (GET /tts/logs): top-level `{ logs: [...], pagination: {
+ * page, limit, total, pages } }` — not `{ data: { logs, total } }`.
+ */
 export function formatTTSLogList(
-  logs: TTSLog[],
+  logs: any[],
   total: number,
   offset: number,
   hasMore: boolean,
@@ -212,12 +247,15 @@ export function formatTTSLogList(
   lines.push("");
 
   for (const log of logs) {
-    lines.push(`### ${log.id}`);
-    lines.push(`- **Text**: ${log.text.substring(0, 80)}${log.text.length > 80 ? "..." : ""}`);
-    lines.push(`- **Voice**: ${log.voice_name}`);
-    lines.push(`- **Duration**: ${formatDuration(log.duration)}`);
-    lines.push(`- **Credits**: ${log.credits_used}`);
-    lines.push(`- **Date**: ${formatDate(log.created_at)}`);
+    const id = log?.hash_id ?? log?.id ?? "unknown";
+    const text: string = log?.input_text ?? "";
+    lines.push(`### ${id}`);
+    lines.push(`- **Text**: ${text.substring(0, 80)}${text.length > 80 ? "..." : ""}`);
+    lines.push(`- **Voice**: ${log?.voice_name ?? "unknown"}`);
+    lines.push(`- **Status**: ${log?.status ?? "unknown"}`);
+    lines.push(`- **Duration**: ${formatDuration(log?.duration_seconds)}`);
+    lines.push(`- **Cost**: ${formatCost(log?.cost_usd)}`);
+    if (log?.created_at) lines.push(`- **Date**: ${formatDate(log.created_at)}`);
     lines.push("");
   }
 
@@ -229,34 +267,53 @@ export function formatTTSLogList(
 }
 
 /**
- * Format STT log/response
+ * Format a single STT result. Two possible shapes hit this function:
+ * 1) The live transcription response from POST /stt (upstream passthrough):
+ *    { request_id, text, language, duration_sec, segments, warning_codes,
+ *      hash_id, has_audio, ... }
+ * 2) A `stt_item` history row from GET /stt/{id}: { id, hash_id, transcript,
+ *    language, duration_seconds, cost_usd, status, created_at, has_audio,
+ *    input_audio_url (private S3 key, not a public URL) }.
  */
 export function formatSTTLog(
-  log: STTLog,
+  log: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
     return JSON.stringify(log, null, 2);
   }
 
+  const id = log?.hash_id ?? log?.request_id ?? log?.id ?? "unknown";
+  const text: string = log?.text ?? log?.transcript ?? "";
+  const duration = log?.duration_sec ?? log?.duration_seconds;
+  const language = log?.language_name ?? log?.language ?? "unknown";
+
   const lines: string[] = [];
-  lines.push(`## Transcription ${log.id}`);
+  lines.push(`## Transcription ${id}`);
   lines.push("");
-  lines.push(`- **File**: ${log.file_name}`);
-  lines.push(`- **Language**: ${log.language}`);
-  lines.push(`- **Duration**: ${formatDuration(log.duration)}`);
-  lines.push(`- **Credits Used**: ${log.credits_used}`);
-  lines.push(`- **Created**: ${formatDate(log.created_at)}`);
+  lines.push(`- **Language**: ${language}`);
+  lines.push(`- **Duration**: ${formatDuration(duration)}`);
+  if (log?.cost_usd != null) lines.push(`- **Cost**: ${formatCost(log.cost_usd)}`);
+  if (log?.status) lines.push(`- **Status**: ${log.status}`);
+  if (log?.created_at) lines.push(`- **Created**: ${formatDate(log.created_at)}`);
+  if (Array.isArray(log?.warning_codes) && log.warning_codes.length > 0) {
+    lines.push(`- **Warnings**: ${log.warning_codes.join(", ")}`);
+  }
   lines.push("");
   lines.push(`**Transcript:**`);
-  lines.push(`> ${log.text}`);
+  lines.push(text ? `> ${text}` : "> _(empty — no speech detected)_");
   lines.push("");
 
   return lines.join("\n");
 }
 
+/**
+ * Real shape (GET /stt/logs): top-level `{ logs: [...], pagination: {
+ * page, limit, total, pages } }`, rows carry `transcript`/`text_preview`
+ * (not `text`), and no `file_name` field exists.
+ */
 export function formatSTTLogList(
-  logs: STTLog[],
+  logs: any[],
   total: number,
   offset: number,
   hasMore: boolean,
@@ -281,12 +338,13 @@ export function formatSTTLogList(
   lines.push("");
 
   for (const log of logs) {
-    lines.push(`### ${log.id}`);
-    lines.push(`- **File**: ${log.file_name}`);
-    lines.push(`- **Language**: ${log.language}`);
-    lines.push(`- **Duration**: ${formatDuration(log.duration)}`);
-    lines.push(`- **Credits**: ${log.credits_used}`);
-    lines.push(`- **Text**: ${log.text.substring(0, 100)}${log.text.length > 100 ? "..." : ""}`);
+    const id = log?.hash_id ?? log?.id ?? "unknown";
+    const text: string = log?.text_preview ?? log?.transcript ?? "";
+    lines.push(`### ${id}`);
+    lines.push(`- **Language**: ${log?.language ?? "unknown"}`);
+    lines.push(`- **Duration**: ${formatDuration(log?.duration_seconds)}`);
+    if (log?.cost_usd != null) lines.push(`- **Cost**: ${formatCost(log.cost_usd)}`);
+    lines.push(`- **Text**: ${text.substring(0, 100)}${text.length > 100 ? "..." : ""}`);
     lines.push("");
   }
 
@@ -298,10 +356,14 @@ export function formatSTTLogList(
 }
 
 /**
- * Format workspace
+ * Format workspace.
+ * Real shape (GET /workspaces list item, or POST /workspaces data): id,
+ * hash_id, name, role, owner_name, created_at. There is no "description"
+ * field on the backend and no single GET /workspaces/:id route — see
+ * workspaces.ts (sixtydb_get_workspace filters the list client-side).
  */
 export function formatWorkspace(
-  workspace: Workspace,
+  workspace: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -311,16 +373,17 @@ export function formatWorkspace(
   const lines: string[] = [];
   lines.push(`## ${workspace.name} (${workspace.id})`);
   lines.push("");
-  if (workspace.description) lines.push(`- **Description**: ${workspace.description}`);
-  lines.push(`- **Owner ID**: ${workspace.owner_id}`);
-  lines.push(`- **Created**: ${formatDate(workspace.created_at)}`);
+  if (workspace.hash_id) lines.push(`- **Hash ID**: ${workspace.hash_id}`);
+  if (workspace.role) lines.push(`- **Your Role**: ${workspace.role}`);
+  if (workspace.owner_name) lines.push(`- **Owner**: ${workspace.owner_name}`);
+  if (workspace.created_at) lines.push(`- **Created**: ${formatDate(workspace.created_at)}`);
   lines.push("");
 
   return lines.join("\n");
 }
 
 export function formatWorkspaceList(
-  workspaces: Workspace[],
+  workspaces: any[],
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -333,9 +396,9 @@ export function formatWorkspaceList(
 
   for (const ws of workspaces) {
     lines.push(`### ${ws.name} (${ws.id})`);
-    if (ws.description) lines.push(`- **Description**: ${ws.description}`);
-    lines.push(`- **Owner**: ${ws.owner_id}`);
-    lines.push(`- **Created**: ${formatDate(ws.created_at)}`);
+    if (ws.role) lines.push(`- **Your Role**: ${ws.role}`);
+    if (ws.owner_name) lines.push(`- **Owner**: ${ws.owner_name}`);
+    if (ws.created_at) lines.push(`- **Created**: ${formatDate(ws.created_at)}`);
     lines.push("");
   }
 
@@ -343,10 +406,12 @@ export function formatWorkspaceList(
 }
 
 /**
- * Format workspace member
+ * Format workspace member.
+ * Real shape (GET /workspaces/:id/members item): user_id, full_name, email,
+ * avatar_url, role, joined_at, is_active, invitee_id.
  */
 export function formatWorkspaceMember(
-  member: WorkspaceMember,
+  member: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -354,10 +419,11 @@ export function formatWorkspaceMember(
   }
 
   const lines: string[] = [];
-  lines.push(`- **${member.user?.name || member.user_id}** (${member.role})`);
+  lines.push(`- **${member.full_name || member.user_id}** (${member.role})`);
   lines.push(`  - User ID: ${member.user_id}`);
-  if (member.user?.email) lines.push(`  - Email: ${member.user.email}`);
-  lines.push(`  - Joined: ${formatDate(member.joined_at)}`);
+  if (member.email) lines.push(`  - Email: ${member.email}`);
+  if (member.joined_at) lines.push(`  - Joined: ${formatDate(member.joined_at)}`);
+  if (member.is_active === false) lines.push(`  - **Inactive**`);
 
   return lines.join("\n");
 }
@@ -427,34 +493,52 @@ export function formatUsageStats(
 }
 
 /**
- * Format invoice
+ * Format invoice.
+ * Real shape differs between GET /billing/invoices (list item: flat
+ * plan_name/workspace_name/period_start/period_end) and GET
+ * /billing/invoices/:id (single: nested plan{name,description},
+ * workspace{name}, user{name,email}, period{start,end}). No `due_date`
+ * field exists on either shape — billing_invoices has no due-date concept.
  */
 export function formatInvoice(
-  invoice: Invoice,
+  invoice: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
     return JSON.stringify(invoice, null, 2);
   }
 
+  const planName = invoice.plan?.name ?? invoice.plan_name;
+  const periodStart = invoice.period?.start ?? invoice.period_start;
+  const periodEnd = invoice.period?.end ?? invoice.period_end;
+  const amount = Number(invoice.amount) || 0;
+
   const lines: string[] = [];
   lines.push(`## Invoice ${invoice.id}`);
   lines.push("");
-  lines.push(`- **Amount**: ${invoice.currency === "USD" ? "$" : "€"}${invoice.amount.toFixed(2)}`);
-  lines.push(`- **Status**: ${invoice.status.toUpperCase()}`);
-  lines.push(`- **Due Date**: ${formatDate(invoice.due_date)}`);
-  if (invoice.paid_at) lines.push(`- **Paid**: ${formatDate(invoice.paid_at)}`);
-  lines.push(`- **Download**: ${invoice.invoice_url}`);
+  lines.push(`- **Amount**: ${invoice.currency === "USD" ? "$" : invoice.currency + " "}${amount.toFixed(2)}`);
+  lines.push(`- **Status**: ${String(invoice.status || "unknown").toUpperCase()}`);
+  if (planName) lines.push(`- **Plan**: ${planName}`);
+  if (periodStart) lines.push(`- **Period**: ${formatDate(periodStart)} → ${periodEnd ? formatDate(periodEnd) : "?"}`);
+  if (invoice.payment_method) lines.push(`- **Payment Method**: ${invoice.payment_method}`);
+  if (invoice.invoice_url) lines.push(`- **Download**: ${invoice.invoice_url}`);
+  if (invoice.created_at) lines.push(`- **Created**: ${formatDate(invoice.created_at)}`);
   lines.push("");
 
   return lines.join("\n");
 }
 
 /**
- * Format meeting
+ * Format meeting.
+ * Real shape (GET /60db/meetings/:id data): id, title, platform, start_time,
+ * end_time, duration_minutes, status, trigger_type, audio_url,
+ * transcript: [{id,text,is_final,confidence,timestamp}], notes:
+ * {id,summary,key_points,action_items,decisions,generated_at} | null.
+ * There is no `ai_summary`/`ai_notes` string field — summary lives under
+ * `notes.summary`.
  */
 export function formatMeeting(
-  meeting: Meeting,
+  meeting: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -464,18 +548,28 @@ export function formatMeeting(
   const lines: string[] = [];
   lines.push(`## ${meeting.title} (${meeting.id})`);
   lines.push("");
-  lines.push(`- **Status**: ${meeting.status.toUpperCase()}`);
-  if (meeting.duration) lines.push(`- **Duration**: ${formatDuration(meeting.duration)}`);
-  lines.push(`- **Created**: ${formatDate(meeting.created_at)}`);
-  if (meeting.ai_summary) {
+  lines.push(`- **Status**: ${String(meeting.status || "unknown").toUpperCase()}`);
+  if (meeting.platform) lines.push(`- **Platform**: ${meeting.platform}`);
+  if (meeting.duration_minutes != null) lines.push(`- **Duration**: ${meeting.duration_minutes} min`);
+  if (meeting.start_time) lines.push(`- **Start**: ${formatDate(meeting.start_time)}`);
+  if (meeting.end_time) lines.push(`- **End**: ${formatDate(meeting.end_time)}`);
+  if (meeting.audio_url) lines.push(`- **Audio**: ${meeting.audio_url}`);
+
+  if (meeting.notes?.summary) {
     lines.push("");
     lines.push(`**AI Summary:**`);
-    lines.push(`> ${meeting.ai_summary}`);
+    lines.push(`> ${meeting.notes.summary}`);
   }
-  if (meeting.transcript) {
+  if (Array.isArray(meeting.notes?.key_points) && meeting.notes.key_points.length > 0) {
+    lines.push("");
+    lines.push(`**Key Points:**`);
+    for (const kp of meeting.notes.key_points) lines.push(`- ${kp}`);
+  }
+  if (Array.isArray(meeting.transcript) && meeting.transcript.length > 0) {
+    const preview = meeting.transcript.map((c: any) => c.text).join(" ").slice(0, 300);
     lines.push("");
     lines.push(`**Transcript Preview:**`);
-    lines.push(`> ${meeting.transcript.substring(0, 200)}${meeting.transcript.length > 200 ? "..." : ""}`);
+    lines.push(`> ${preview}${preview.length >= 300 ? "..." : ""}`);
   }
   lines.push("");
 
@@ -483,12 +577,15 @@ export function formatMeeting(
 }
 
 /**
- * Format meeting list
+ * Format meeting list.
+ * Real shape (GET /60db/meetings data): { meetings: [{id, title, platform,
+ * start_time, end_time, duration_minutes, status, trigger_type, has_audio,
+ * has_notes}], total, page, limit } — page-based, not offset-based.
  */
 export function formatMeetingList(
-  meetings: Meeting[],
+  meetings: any[],
   total: number,
-  offset: number,
+  page: number,
   hasMore: boolean,
   format: ResponseFormat
 ): string {
@@ -496,10 +593,10 @@ export function formatMeetingList(
     const response = {
       total,
       count: meetings.length,
-      offset,
+      page,
       meetings,
       has_more: hasMore,
-      next_offset: hasMore ? offset + meetings.length : undefined
+      next_page: hasMore ? page + 1 : undefined
     };
     return JSON.stringify(response, null, 2);
   }
@@ -507,30 +604,33 @@ export function formatMeetingList(
   const lines: string[] = [];
   lines.push(`# Meetings (${total} total)`);
   lines.push("");
-  lines.push(`Showing ${meetings.length} meetings (offset: ${offset})`);
+  lines.push(`Showing ${meetings.length} meetings (page ${page})`);
   lines.push("");
 
   for (const meeting of meetings) {
     lines.push(`### ${meeting.title} (${meeting.id})`);
-    lines.push(`- **Status**: ${meeting.status.toUpperCase()}`);
-    if (meeting.duration) lines.push(`- **Duration**: ${formatDuration(meeting.duration)}`);
-    lines.push(`- **Created**: ${formatDate(meeting.created_at)}`);
-    if (meeting.ai_summary) lines.push(`- **Summary**: ${meeting.ai_summary.substring(0, 80)}...`);
+    lines.push(`- **Status**: ${String(meeting.status || "unknown").toUpperCase()}`);
+    if (meeting.platform) lines.push(`- **Platform**: ${meeting.platform}`);
+    if (meeting.duration_minutes != null) lines.push(`- **Duration**: ${meeting.duration_minutes} min`);
+    if (meeting.start_time) lines.push(`- **Start**: ${formatDate(meeting.start_time)}`);
+    lines.push(`- **Has notes**: ${meeting.has_notes ? "yes" : "no"} | **Has audio**: ${meeting.has_audio ? "yes" : "no"}`);
     lines.push("");
   }
 
   if (hasMore) {
-    lines.push(`---\n**More results available.** Use offset=${offset + meetings.length} to see more.`);
+    lines.push(`---\n**More results available.** Use page=${page + 1} to see more.`);
   }
 
   return lines.join("\n");
 }
 
 /**
- * Format note
+ * Format note.
+ * Real shape (60db/notes row): id, title, content, tag (singular string,
+ * not a `tags` array), timestamp, createdAt, updatedAt.
  */
 export function formatNote(
-  note: Note,
+  note: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -538,25 +638,31 @@ export function formatNote(
   }
 
   const lines: string[] = [];
-  lines.push(`## ${note.title} (${note.id})`);
+  lines.push(`## ${note.title || "(untitled)"} (${note.id})`);
   lines.push("");
-  if (note.tags && note.tags.length > 0) {
-    lines.push(`**Tags**: ${note.tags.map(t => `\`${t}\``).join(", ")}`);
+  if (note.tag) {
+    lines.push(`**Tag**: \`${note.tag}\``);
     lines.push("");
   }
-  lines.push(note.content);
+  lines.push(note.content || "");
   lines.push("");
-  lines.push(`*Created: ${formatDate(note.created_at)} | Updated: ${formatDate(note.updated_at)}*`);
-  lines.push("");
+  const created = note.createdAt ?? note.created_at;
+  const updated = note.updatedAt ?? note.updated_at;
+  if (created || updated) {
+    lines.push(`*Created: ${created ? formatDate(created) : "?"}${updated ? ` | Updated: ${formatDate(updated)}` : ""}*`);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
 
 /**
- * Format dictionary entry
+ * Format dictionary entry.
+ * Real shape (60db_dictionary row): id, term, replacement, tag, scope,
+ * createdBy, createdAt. There is no `phrase` or `voice_id` field.
  */
 export function formatDictionaryEntry(
-  entry: DictionaryEntry,
+  entry: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -564,19 +670,21 @@ export function formatDictionaryEntry(
   }
 
   const lines: string[] = [];
-  lines.push(`- **"${entry.phrase}"** → **"${entry.replacement}"**`);
+  lines.push(`- **"${entry.term}"** → **"${entry.replacement}"**`);
   lines.push(`  - Scope: ${entry.scope}`);
   lines.push(`  - ID: ${entry.id}`);
-  if (entry.voice_id) lines.push(`  - Voice: ${entry.voice_id}`);
+  if (entry.tag) lines.push(`  - Tag: ${entry.tag}`);
 
   return lines.join("\n");
 }
 
 /**
- * Format snippet
+ * Format snippet.
+ * Real shape (60db_snippets row): id, title, content, tag, scope,
+ * createdBy, createdAt. There is no `category` field (renamed to `tag`).
  */
 export function formatSnippet(
-  snippet: Snippet,
+  snippet: any,
   format: ResponseFormat
 ): string {
   if (format === ResponseFormat.JSON) {
@@ -585,12 +693,15 @@ export function formatSnippet(
 
   const lines: string[] = [];
   lines.push(`### ${snippet.title} (${snippet.id})`);
-  if (snippet.category) lines.push(`**Category**: ${snippet.category}`);
+  if (snippet.tag) lines.push(`**Tag**: ${snippet.tag}`);
+  if (snippet.scope) lines.push(`**Scope**: ${snippet.scope}`);
   lines.push("");
   lines.push(snippet.content);
   lines.push("");
-  lines.push(`*Created: ${formatDate(snippet.created_at)}*`);
-  lines.push("");
+  if (snippet.createdAt || snippet.created_at) {
+    lines.push(`*Created: ${formatDate(snippet.createdAt ?? snippet.created_at)}*`);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }

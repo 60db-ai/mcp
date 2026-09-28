@@ -41,40 +41,29 @@ export function register60DBTools(server: McpServer): void {
     "sixtydb_60db_list_dictionary",
     {
       title: "List 60DB Dictionary Entries",
-      description: `List pronunciation dictionary entries with filtering and pagination.
+      description: `List pronunciation dictionary entries.
 
-The 60DB dictionary allows you to define custom phrase replacements for better transcription accuracy. This is useful for names, technical terms, acronyms, and industry-specific vocabulary.
+The 60DB dictionary allows you to define custom term replacements for better transcription accuracy. This is useful for names, technical terms, acronyms, and industry-specific vocabulary. \`scope=all\` (default) returns your personal entries plus your workspace's team entries in a single unfiltered list (no pagination or search on this endpoint).
 
 **Parameters:**
 - scope ('personal' | 'team' | 'all', optional): Filter by entry scope (default: 'all')
-- voice_id (string, optional): Filter entries for specific voice
-- search (string, optional): Search term for phrases
-- limit (number, optional): Maximum results to return (1-100, default: 20)
-- offset (number, optional): Number of results to skip for pagination (default: 0)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- List of dictionary entries
-- Each entry shows phrase → replacement mapping
-
 For JSON format:
 {
-  "total": number,           // Total number of entries
-  "count": number,           // Number in this response
-  "offset": number,          // Current pagination offset
-  "entries": [               // Array of dictionary entries
+  "total": number,           // Number of entries returned
+  "entries": [                // Array of dictionary entries
     {
-      "id": string,          // Entry ID
-      "phrase": string,      // Original phrase to replace
+      "id": string,          // Entry ID (hash_id)
+      "term": string,        // Original term/phrase to replace
       "replacement": string, // Replacement text
-      "scope": string,       // 'personal' or 'team'
-      "voice_id": string,    // Specific voice (if applicable)
-      "created_at": string   // Creation timestamp
+      "tag": string | null,  // Optional label
+      "scope": "personal" | "team",
+      "createdBy": number,   // User ID that created the entry
+      "createdAt": string    // Creation timestamp
     }
-  ],
-  "has_more": boolean,       // Whether more results exist
-  "next_offset": number      // Next page offset
+  ]
 }
 
 **Use Cases:**
@@ -85,9 +74,7 @@ For JSON format:
 
 **Examples:**
 - All entries: {}
-- Team entries: { "scope": "team" }
-- Search for term: { "search": "QLabs" }
-- Voice-specific: { "voice_id": "voice_abc123" }
+- Team entries only: { "scope": "team" }
 
 **Error Handling:**
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
@@ -104,39 +91,19 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const queryParams: Record<string, unknown> = {
-          limit: params.limit,
-          offset: params.offset
-        };
-
+        const queryParams: Record<string, unknown> = {};
         if (params.scope !== "all") queryParams.scope = params.scope;
-        if (params.voice_id) queryParams.voice_id = params.voice_id;
-        if (params.search) queryParams.search = params.search;
 
-        const data = await apiClient.get<{
-          entries: unknown[];
-          total: number;
-        }>("/60db/dictionary", queryParams);
-
-        const entries = data.entries || [];
-        const total = data.total || entries.length;
-        const hasMore = params.offset + entries.length < total;
+        // GET /60db/dictionary returns { success, data: [...] } — no pagination.
+        const response = await apiClient.get<{ data: unknown[] }>("/60db/dictionary", queryParams);
+        const entries = response.data || [];
 
         const lines: string[] = [];
-        lines.push(`# 60DB Dictionary (${total} entries)`);
+        lines.push(`# 60DB Dictionary (${entries.length} entries)`);
         lines.push("");
 
         if (params.response_format === ResponseFormat.JSON) {
-          const response = {
-            total,
-            count: entries.length,
-            offset: params.offset,
-            entries,
-            has_more: hasMore,
-            next_offset: hasMore ? params.offset + entries.length : undefined
-          };
-
-          const formatted = JSON.stringify(response, null, 2);
+          const formatted = JSON.stringify({ total: entries.length, entries }, null, 2);
           const { content } = truncateIfNeeded(formatted, true);
 
           return {
@@ -147,10 +114,6 @@ For JSON format:
         // Markdown format
         for (const entry of entries as any) {
           lines.push(formatDictionaryEntry(entry, params.response_format));
-        }
-
-        if (hasMore) {
-          lines.push(`\n---\n**More results available.** Use offset=${params.offset + entries.length} to see more.`);
         }
 
         const { content } = truncateIfNeeded(lines.join("\n"), false);
@@ -176,34 +139,29 @@ For JSON format:
       title: "Add 60DB Dictionary Entry",
       description: `Add a new pronunciation dictionary entry.
 
-Dictionary entries define how specific phrases should be transcribed, improving accuracy for names, technical terms, and industry-specific vocabulary.
+Dictionary entries define how specific terms should be transcribed, improving accuracy for names, technical terms, and industry-specific vocabulary.
 
 **Parameters:**
-- phrase (string, required): The phrase to replace (max 200 characters)
+- term (string, required): The term/phrase to replace (max 200 characters)
 - replacement (string, required): The replacement text (max 200 characters)
+- tag (string, optional): Optional label for the entry (e.g. "abbreviation")
 - scope ('personal' | 'team', optional): Entry scope (default: 'personal')
-- voice_id (string, optional): Apply to specific voice only
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- Created entry details
-- Shows phrase → replacement mapping
-
 For JSON format:
 {
-  "id": string,              // Entry ID
-  "phrase": string,          // Original phrase
+  "id": string,              // Entry ID (hash_id)
+  "term": string,            // Original term
   "replacement": string,     // Replacement text
+  "tag": string | null,
   "scope": string,           // Entry scope
-  "voice_id": string,        // Specific voice (if applicable)
-  "created_at": string       // Creation timestamp
+  "createdBy": number
 }
 
 **Examples:**
-- Personal entry: { "phrase": "QLabs", "replacement": "Cue Labs" }
-- Team entry: { "phrase": "CEO", "replacement": "Chief Executive Officer", "scope": "team" }
-- Voice-specific: { "phrase": "numpy", "replacement": "num pi", "voice_id": "voice_abc123" }
+- Personal entry: { "term": "QLabs", "replacement": "Cue Labs" }
+- Team entry: { "term": "CEO", "replacement": "Chief Executive Officer", "scope": "team" }
 
 **Best Practices:**
 - Use for names: "Nguyen" → "Win"
@@ -211,8 +169,7 @@ For JSON format:
 - Acronyms: "YOLO" → "you only live once"
 
 **Error Handling:**
-- Returns "Error: Phrase already exists" if duplicate phrase
-- Returns "Error: Invalid voice_id" if voice doesn't exist`,
+- Returns "Error: term and replacement are required" if either is missing`,
       inputSchema: DictionaryAddSchema,
       annotations: {
         title: "Add 60DB Dictionary Entry",
@@ -227,15 +184,16 @@ For JSON format:
         const apiClient = getApiClient();
 
         const requestBody = {
-          phrase: params.phrase,
+          term: params.term,
           replacement: params.replacement,
           scope: params.scope,
-          ...(params.voice_id && { voice_id: params.voice_id })
+          ...(params.tag && { tag: params.tag })
         };
 
-        const entry = await apiClient.post<unknown>("/60db/dictionary", requestBody);
+        // POST /60db/dictionary returns { success, message, data: {...} }.
+        const response = await apiClient.post<{ data: unknown }>("/60db/dictionary", requestBody);
 
-        const formatted = formatDictionaryEntry(entry as any, params.response_format);
+        const formatted = formatDictionaryEntry(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -261,39 +219,29 @@ For JSON format:
     "sixtydb_60db_list_snippets",
     {
       title: "List 60DB Snippets",
-      description: `List text snippets with filtering and pagination.
+      description: `List text snippets.
 
-Snippets are reusable text templates that can be quickly inserted into transcriptions, notes, or other text content.
+Snippets are reusable text templates that can be quickly inserted into transcriptions, notes, or other text content. \`scope=all\` (default) returns your personal snippets plus your workspace's team snippets (no pagination or search on this endpoint).
 
 **Parameters:**
-- category (string, optional): Filter by category
-- search (string, optional): Search term for titles/content
-- limit (number, optional): Maximum results to return (1-100, default: 20)
-- offset (number, optional): Number of results to skip for pagination (default: 0)
+- scope ('personal' | 'team' | 'all', optional): Filter by scope (default: 'all')
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- List of snippets with titles and content
-- Organized by category if applicable
-
 For JSON format:
 {
   "total": number,
-  "count": number,
-  "offset": number,
   "snippets": [             // Array of snippet objects
     {
       "id": string,
       "title": string,
       "content": string,
-      "category": string,
-      "created_at": string,
-      "updated_at": string
+      "tag": string | null,
+      "scope": "personal" | "team",
+      "createdBy": number,
+      "createdAt": string
     }
-  ],
-  "has_more": boolean,
-  "next_offset": number
+  ]
 }
 
 **Use Cases:**
@@ -303,8 +251,7 @@ For JSON format:
 
 **Examples:**
 - All snippets: {}
-- By category: { "category": "greetings" }
-- Search: { "search": "meeting" }
+- Team snippets only: { "scope": "team" }
 
 **Error Handling:**
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
@@ -321,38 +268,19 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const queryParams: Record<string, unknown> = {
-          limit: params.limit,
-          offset: params.offset
-        };
+        const queryParams: Record<string, unknown> = {};
+        if (params.scope !== "all") queryParams.scope = params.scope;
 
-        if (params.category) queryParams.category = params.category;
-        if (params.search) queryParams.search = params.search;
-
-        const data = await apiClient.get<{
-          snippets: unknown[];
-          total: number;
-        }>("/60db/snippets", queryParams);
-
-        const snippets = data.snippets || [];
-        const total = data.total || snippets.length;
-        const hasMore = params.offset + snippets.length < total;
+        // GET /60db/snippets returns { success, data: [...] } — no pagination.
+        const response = await apiClient.get<{ data: unknown[] }>("/60db/snippets", queryParams);
+        const snippets = response.data || [];
 
         const lines: string[] = [];
-        lines.push(`# 60DB Snippets (${total} total)`);
+        lines.push(`# 60DB Snippets (${snippets.length} total)`);
         lines.push("");
 
         if (params.response_format === ResponseFormat.JSON) {
-          const response = {
-            total,
-            count: snippets.length,
-            offset: params.offset,
-            snippets,
-            has_more: hasMore,
-            next_offset: hasMore ? params.offset + snippets.length : undefined
-          };
-
-          const formatted = JSON.stringify(response, null, 2);
+          const formatted = JSON.stringify({ total: snippets.length, snippets }, null, 2);
           const { content } = truncateIfNeeded(formatted, true);
 
           return {
@@ -363,10 +291,6 @@ For JSON format:
         // Markdown format
         for (const snippet of snippets as any) {
           lines.push(formatSnippet(snippet, params.response_format));
-        }
-
-        if (hasMore) {
-          lines.push(`\n---\n**More results available.** Use offset=${params.offset + snippets.length} to see more.`);
         }
 
         const { content } = truncateIfNeeded(lines.join("\n"), false);
@@ -397,7 +321,8 @@ Snippets are reusable text templates for quick insertion into transcriptions, no
 **Parameters:**
 - title (string, required): Snippet title (max 100 characters)
 - content (string, required): Snippet content (max 10000 characters)
-- category (string, optional): Snippet category (max 50 characters)
+- tag (string, optional): Snippet tag/category (max 50 characters)
+- scope ('personal' | 'team', optional): Snippet scope (default: 'personal')
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
@@ -405,7 +330,7 @@ Created snippet details with ID and metadata.
 
 **Examples:**
 - Basic snippet: { "title": "Meeting Opening", "content": "Thank you all for joining..." }
-- With category: { "title": "Sign-off", "content": "Best regards,", "category": "closings" }
+- With tag: { "title": "Sign-off", "content": "Best regards,", "tag": "closings" }
 
 **Use Cases:**
 - Standard meeting openings/closings
@@ -413,7 +338,7 @@ Created snippet details with ID and metadata.
 - Reusable descriptions or templates
 
 **Error Handling:**
-- Returns "Error: Title already exists" if duplicate title`,
+- Returns "Error: title and content are required" if either is missing`,
       inputSchema: SnippetAddSchema,
       annotations: {
         title: "Add 60DB Snippet",
@@ -430,12 +355,14 @@ Created snippet details with ID and metadata.
         const requestBody = {
           title: params.title,
           content: params.content,
-          ...(params.category && { category: params.category })
+          scope: params.scope,
+          ...(params.tag && { tag: params.tag })
         };
 
-        const snippet = await apiClient.post<unknown>("/60db/snippets", requestBody);
+        // POST /60db/snippets returns { success, message, data: {...} }.
+        const response = await apiClient.post<{ data: unknown }>("/60db/snippets", requestBody);
 
-        const formatted = formatSnippet(snippet as any, params.response_format);
+        const formatted = formatSnippet(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -461,35 +388,28 @@ Created snippet details with ID and metadata.
     "sixtydb_60db_list_notes",
     {
       title: "List 60DB Notes",
-      description: `List personal notes with filtering and pagination.
+      description: `List personal notes with pagination.
 
-Notes are for storing personal thoughts, summaries, or any text content with optional tags for organization.
+Notes are for storing personal thoughts, summaries, or any text content with an optional single tag for organization. There is no tag-filter or search on this endpoint — only pagination.
 
 **Parameters:**
-- tags (array of strings, optional): Filter by tags
-- search (string, optional): Search term for titles/content
 - limit (number, optional): Maximum results to return (1-100, default: 20)
 - offset (number, optional): Number of results to skip for pagination (default: 0)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- List of notes with titles, tags, and content previews
-- Shows creation and update dates
-
 For JSON format:
 {
   "total": number,
-  "count": number,
-  "offset": number,
   "notes": [                // Array of note objects
     {
       "id": string,
       "title": string,
       "content": string,
-      "tags": string[],
-      "created_at": string,
-      "updated_at": string
+      "tag": string | null,
+      "timestamp": number,
+      "createdAt": string,
+      "updatedAt": string
     }
   ],
   "has_more": boolean,
@@ -499,12 +419,10 @@ For JSON format:
 **Use Cases:**
 - Store meeting notes and summaries
 - Keep research notes and findings
-- Organize thoughts with tags
 
 **Examples:**
-- All notes: {}
-- By tag: { "tags": ["project-alpha"] }
-- Search: { "search": "transcription" }
+- Recent notes: {}
+- Next page: { "offset": 20 }
 
 **Error Handling:**
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
@@ -526,16 +444,14 @@ For JSON format:
           offset: params.offset
         };
 
-        if (params.tags) queryParams.tags = params.tags.join(",");
-        if (params.search) queryParams.search = params.search;
-
+        // GET /60db/notes returns { success, data: [...], total } (no `notes` key).
         const data = await apiClient.get<{
-          notes: unknown[];
+          data: unknown[];
           total: number;
         }>("/60db/notes", queryParams);
 
-        const notes = data.notes || [];
-        const total = data.total || notes.length;
+        const notes = data.data || [];
+        const total = data.total ?? notes.length;
         const hasMore = params.offset + notes.length < total;
 
         const lines: string[] = [];
@@ -592,28 +508,25 @@ For JSON format:
       title: "Add 60DB Note",
       description: `Add a new personal note.
 
-Notes are for storing personal thoughts, summaries, or any text content with optional tags for organization.
+Notes are for storing personal thoughts, summaries, or any text content with an optional single tag for organization.
 
 **Parameters:**
 - title (string, required): Note title (max 200 characters)
 - content (string, required): Note content (max 50000 characters)
-- tags (array of strings, optional): Note tags (max 10 tags, 50 chars each)
+- tag (string, optional): Single tag for the note (max 50 characters)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-Created note details with ID, tags, and metadata.
+Created note details with ID, tag, and metadata.
 
 **Examples:**
 - Basic note: { "title": "Meeting Notes", "content": "Discussed Q1 roadmap..." }
-- With tags: { "title": "Research", "content": "Findings from user testing...", "tags": ["ux", "research"] }
+- With a tag: { "title": "Research", "content": "Findings from user testing...", "tag": "ux" }
 
 **Use Cases:**
 - Meeting summaries and action items
 - Research notes and findings
-- Personal reminders and thoughts
-
-**Error Handling:**
-- Returns "Error: Too many tags" if more than 10 tags provided`,
+- Personal reminders and thoughts`,
       inputSchema: NoteAddSchema,
       annotations: {
         title: "Add 60DB Note",
@@ -630,12 +543,13 @@ Created note details with ID, tags, and metadata.
         const requestBody = {
           title: params.title,
           content: params.content,
-          ...(params.tags && { tags: params.tags })
+          ...(params.tag && { tag: params.tag })
         };
 
-        const note = await apiClient.post<unknown>("/60db/notes", requestBody);
+        // POST /60db/notes returns { success, message, data: {...} }.
+        const response = await apiClient.post<{ data: unknown }>("/60db/notes", requestBody);
 
-        const formatted = formatNote(note as any, params.response_format);
+        const formatted = formatNote(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -663,18 +577,20 @@ Created note details with ID, tags, and metadata.
       title: "Get 60DB Note Details",
       description: `Get detailed information about a specific note.
 
+There is no dedicated "get one note" endpoint on the 60db API. This tool paginates through GET /60db/notes (up to 200 most recent notes) and returns the entry matching the given id — note content is already returned in full by the list endpoint, so this is mainly a convenience lookup.
+
 **Parameters:**
-- id (string, required): Note ID
+- id (string, required): Note ID (hash_id, as returned by sixtydb_60db_list_notes)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-Complete note details with full content, tags, and metadata.
+Complete note details with full content, tag, and metadata.
 
 **Examples:**
 - Get note: { "id": "note_abc123" }
 
 **Error Handling:**
-- Returns "Error: Note not found" if ID doesn't exist (404 status)`,
+- Returns "Error: Note not found" if the id isn't among the 200 most recent notes`,
       inputSchema: NoteGetSchema,
       annotations: {
         title: "Get 60DB Note Details",
@@ -688,9 +604,21 @@ Complete note details with full content, tags, and metadata.
       try {
         const apiClient = getApiClient();
 
-        const note = await apiClient.get<unknown>(`/60db/notes/${params.id}`);
+        // No GET /60db/notes/:id route — search the most recent notes instead.
+        const response = await apiClient.get<{ data: any[] }>("/60db/notes", { limit: 200, offset: 0 });
+        const notes = response.data || [];
+        const note = notes.find((n) => n.id === params.id);
 
-        const formatted = formatNote(note as any, params.response_format);
+        if (!note) {
+          return {
+            content: [{
+              type: "text",
+              text: `**Error**: Note not found. "${params.id}" was not among the 200 most recent notes (use sixtydb_60db_list_notes with offset to page further back).`
+            }]
+          };
+        }
+
+        const formatted = formatNote(note, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,

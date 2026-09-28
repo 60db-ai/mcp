@@ -51,12 +51,12 @@ For JSON format:
 {
   "workspaces": [
     {
-      "id": string,              // Workspace ID
+      "id": number,              // Numeric workspace ID
+      "hash_id": string,         // Workspace hash ID
       "name": string,            // Workspace name
-      "description": string,     // Workspace description
-      "owner_id": string,        // Owner user ID
-      "created_at": string,      // Creation timestamp
-      "updated_at": string       // Last update timestamp
+      "role": string,            // Your role in this workspace
+      "owner_name": string,      // Workspace owner's display name
+      "created_at": string       // Creation timestamp
     }
   ],
   "total": number               // Total number of workspaces
@@ -86,7 +86,9 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const workspaces = await apiClient.get<unknown[]>("/workspaces");
+        // GET /workspaces returns { success, message, data: [...] } — not a bare array.
+        const response = await apiClient.get<{ data: unknown[] }>("/workspaces");
+        const workspaces = response.data || [];
 
         const formatted = formatWorkspaceList(workspaces as any, params.response_format);
 
@@ -119,29 +121,25 @@ For JSON format:
       title: "Get Workspace Details",
       description: `Get detailed information about a specific workspace.
 
-This tool retrieves complete details for a single workspace including description, owner, and metadata.
+There is no dedicated "get one workspace" endpoint on the 60db API — this tool fetches the full list (GET /workspaces) and returns the entry matching the given id.
 
 **Parameters:**
-- id (string, required): Workspace ID
+- id (string, required): Workspace id (numeric) or hash_id, as returned by sixtydb_list_workspaces
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- Complete workspace information
-- Shows description, owner, and dates
-
 For JSON format:
 {
-  "id": string,              // Workspace ID
-  "name": string,            // Workspace name
-  "description": string,     // Workspace description
-  "owner_id": string,        // Owner user ID
-  "created_at": string,      // Creation timestamp
-  "updated_at": string       // Last update timestamp
+  "id": number,            // Numeric workspace ID
+  "hash_id": string,       // Workspace hash ID
+  "name": string,          // Workspace name
+  "role": string,          // Your role in this workspace
+  "owner_name": string,    // Workspace owner's display name
+  "created_at": string     // Creation timestamp
 }
 
 **Examples:**
-- Get workspace details: { "id": "workspace_abc123" }
+- Get workspace details: { "id": "12" }
 
 **Use Cases:**
 - Review workspace information
@@ -149,8 +147,7 @@ For JSON format:
 - Get workspace metadata
 
 **Error Handling:**
-- Returns "Error: Workspace not found" if workspace doesn't exist (404 status)
-- Returns "Error: Access denied" if user lacks permission (403 status)`,
+- Returns "Error: Workspace not found" if no workspace with this id/hash_id is in your workspace list`,
       inputSchema: WorkspaceGetSchema,
       annotations: {
         title: "Get Workspace Details",
@@ -164,9 +161,23 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const workspace = await apiClient.get<unknown>(`/workspaces/${params.id}`);
+        // No GET /workspaces/:id route exists — filter the list instead.
+        const response = await apiClient.get<{ data: any[] }>("/workspaces");
+        const workspaces = response.data || [];
+        const workspace = workspaces.find(
+          (w) => String(w.id) === params.id || w.hash_id === params.id
+        );
 
-        const formatted = formatWorkspace(workspace as any, params.response_format);
+        if (!workspace) {
+          return {
+            content: [{
+              type: "text",
+              text: `**Error**: Workspace not found. "${params.id}" did not match any id or hash_id in your workspace list (use sixtydb_list_workspaces to see available workspaces).`
+            }]
+          };
+        }
+
+        const formatted = formatWorkspace(workspace, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -201,27 +212,22 @@ This tool creates a new workspace where the authenticated user becomes the owner
 
 **Parameters:**
 - name (string, required): Name for the workspace (1-100 characters)
-- description (string, optional): Workspace description (max 500 characters)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
-**Returns:**
-For Markdown format (default):
-- Created workspace details
-- Shows workspace ID and information
+**Note:** The API only stores a \`name\` — there is no description field on workspaces.
 
+**Returns:**
 For JSON format:
 {
-  "id": string,              // New workspace ID
+  "id": number,              // New workspace ID
+  "hash_id": string,         // Workspace hash ID
   "name": string,            // Workspace name
-  "description": string,     // Workspace description
-  "owner_id": string,        // Owner user ID (authenticated user)
-  "created_at": string,      // Creation timestamp
-  "updated_at": string       // Last update timestamp
+  "role": "owner",           // Creator's role
+  "created_at": string       // Creation timestamp
 }
 
 **Examples:**
 - Create workspace: { "name": "Marketing Team" }
-- With description: { "name": "Product Team", "description": "Voice assets for product demos" }
 
 **Use Cases:**
 - Create team-specific workspaces
@@ -249,14 +255,12 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const requestBody = {
-          name: params.name,
-          ...(params.description && { description: params.description })
-        };
+        const requestBody = { name: params.name };
 
-        const workspace = await apiClient.post<unknown>("/workspaces", requestBody);
+        // POST /workspaces returns { success, message, data: {...} }.
+        const response = await apiClient.post<{ data: unknown }>("/workspaces", requestBody);
 
-        const formatted = formatWorkspace(workspace as any, params.response_format);
+        const formatted = formatWorkspace(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,
@@ -302,16 +306,13 @@ For JSON format:
 {
   "members": [
     {
-      "id": string,              // Member ID
-      "user_id": string,         // User ID
-      "workspace_id": string,    // Workspace ID
+      "user_id": number,         // User ID
+      "full_name": string,       // User name
+      "email": string,           // User email
+      "avatar_url": string | null,
       "role": string,            // Role: owner|admin|developer|member|viewer
-      "user": {
-        "id": string,            // User ID
-        "name": string,          // User name
-        "email": string          // User email
-      },
-      "joined_at": string        // Join timestamp
+      "joined_at": string,       // Join timestamp
+      "is_active": boolean
     }
   ],
   "total": number               // Total number of members
@@ -349,9 +350,11 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const members = await apiClient.get<unknown[]>(
+        // GET /workspaces/:id/members returns { success, message, data: [...] }.
+        const response = await apiClient.get<{ data: unknown[] }>(
           `/workspaces/${params.workspace_id}/members`
         );
+        const members = response.data || [];
 
         const lines: string[] = [];
         lines.push(`# Workspace Members (${members.length})`);

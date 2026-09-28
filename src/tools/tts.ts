@@ -1,10 +1,30 @@
 /**
  * Text-to-Speech (TTS) Tools
  * Tools for TTS synthesis and history
+ *
+ * Backend routes actually used (routes/index.js, mounted at "/" and "/tts"):
+ *  - POST /tts-synthesize -> ttsController.synthesizeTTS
+ *      Body: { text, voice_id, speed, stability, similarity, audio_encoding,
+ *              audio_config: { audio_encoding, sample_rate_hertz }, stream }
+ *      Response (non-stream, the default): raw binary audio bytes, NOT JSON.
+ *      Content-Type reflects the encoding (defaults to audio/wav for LINEAR16).
+ *      No audio is persisted server-side — there is no audio_url to fetch
+ *      later, so this tool returns the audio inline as an MCP audio content
+ *      block (base64), not a URL.
+ *  - GET  /tts/logs -> ttsController.getTTSLogs
+ *      Query: page (NOT offset), limit, voice_id, date_from, date_to (NOT
+ *      from_date/to_date). Response: top-level `{ logs, pagination }`, not
+ *      `{ data: { logs, total } }`.
+ *  - GET  /tts/:id  -> ttsController.getTTSDetail. Response: `{ data: row }`.
+ *
+ * The old implementation called /tts-synthesize but parsed the response as
+ * concatenated JSON chunks `{"result":{"audioContent": "..."}}}` — that
+ * shape does not exist on this endpoint (it was likely confused with the
+ * unrelated /tts-stream NDJSON endpoint). The real response is a single
+ * binary blob, which is what this file now handles.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import {
   TTSSynthesizeSchema,
   TTSLogsSchema,
@@ -23,6 +43,24 @@ import {
   formatErrorMessage
 } from "../services/response-formatter.js";
 import { ResponseFormat } from "../types/index.js";
+import { saveTemporaryAudio } from "../services/temporary-audio-store.js";
+
+// Inline base64 audio above this many raw bytes is impractical for a tool
+// response — ask the caller to shorten the text instead of silently
+// truncating audio (which would produce a corrupt, unplayable file).
+const MAX_INLINE_AUDIO_BYTES = 8 * 1024 * 1024;
+
+const AUDIO_ENCODING_BY_FORMAT: Record<string, string> = {
+  wav: "LINEAR16",
+  mp3: "MP3",
+  ogg: "OGG_OPUS"
+};
+
+const MIME_BY_AUDIO_ENCODING: Record<string, string> = {
+  LINEAR16: "audio/wav",
+  MP3: "audio/mpeg",
+  OGG_OPUS: "audio/ogg"
+};
 
 /**
  * Register TTS tools
@@ -33,55 +71,23 @@ export function registerTTSTools(server: McpServer): void {
     "sixtydb_tts_synthesize",
     {
       title: "Synthesize Text-to-Speech",
-      description: `Convert text to speech using the specified voice.
+      description: `Convert text to speech using the specified voice (\`POST /tts-synthesize\`).
 
-This tool generates audio from text using any available voice in the QLabs platform. Supports customizing speed, stability, similarity, and output format. **Note: This operation requires credits based on text length.**
+Returns a **playable audio link** (valid 24 hours) on the hosted server — always show this link to the user. (Local stdio mode returns the audio inline instead.) **Note: This operation deducts from the workspace wallet based on text length.**
 
 **Parameters:**
 - text (string, required): Text to convert to speech (max 5000 characters)
-- voice_id (string, required): ID of the voice to use for synthesis
+- voice_id (string, required): ID of the voice to use — get this from sixtydb_list_voices
 - speed (number, optional): Speech speed multiplier (0.25-2.0, default: 1)
 - stability (number, optional): Voice stability 0-100 (default: 50)
 - similarity (number, optional): Voice similarity 0-100 (default: 75)
-- output_format (string, optional): Audio output format: 'mp3', 'wav', or 'ogg' (default: 'mp3')
+- output_format (string, optional): 'wav' (default, confirmed supported), 'mp3' or 'ogg' (best-effort)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
-**Returns:**
-For Markdown format (default):
-- Audio URL and generation details
-- Credit usage and duration information
-
-For JSON format:
-{
-  "id": string,              // Generation ID
-  "audio_url": string,       // URL to download generated audio
-  "text": string,            // Original text
-  "voice_id": string,        // Voice used
-  "duration": number,        // Audio duration in seconds
-  "credits_used": number,    // Credits charged
-  "created_at": string       // Generation timestamp
-}
-
-**Examples:**
-- Basic synthesis: { "text": "Hello, world!", "voice_id": "voice_abc123" }
-- With custom speed: { "text": "Speak slowly", "voice_id": "voice_abc123", "speed": 0.8 }
-- More expressive: { "text": "Exciting news!", "voice_id": "voice_abc123", "stability": 30 }
-- Higher similarity: { "text": "Clone match", "voice_id": "voice_abc123", "similarity": 90 }
-- WAV format: { "text": "High quality", "voice_id": "voice_abc123", "output_format": "wav" }
-
-**Credit Cost:**
-- Approximately 1 credit per 100 characters
-- Varies by voice type (standard vs cloned)
-- Speed, stability, and similarity adjustments don't affect cost
-
-**Audio Quality:**
-- MP3: Good quality, smaller file size (recommended)
-- WAV: Highest quality, larger file size
-- OGG: Good compression, open format
+**Returns:** a summary (voice, duration estimate, cost) plus an inline audio attachment. If the generated audio is too large to inline (>8MB), returns an error asking you to shorten the text — there is no alternate way to retrieve it since it isn't stored server-side.
 
 **Error Handling:**
-- Returns "Error: Insufficient credits" if account balance is too low
-- Returns "Error: Voice not found" if voice_id is invalid
+- Returns "Error: ... Insufficient credits" (402) if the wallet balance is too low
 - Returns "Error: Text too long" if text exceeds 5000 characters
 - Returns "Error: Rate limit exceeded" if too many requests (429 status)`,
       inputSchema: TTSSynthesizeSchema,
@@ -95,66 +101,97 @@ For JSON format:
     },
     async (params: TTSSynthesizeParams) => {
       try {
-        const apiClient = getApiClient();
+        const audioEncoding = AUDIO_ENCODING_BY_FORMAT[params.output_format ?? "wav"] ?? "LINEAR16";
 
         const requestBody = {
           text: params.text,
           voice_id: params.voice_id,
           speed: params.speed ?? 1,
           stability: params.stability ?? 50,
-          similarity: params.similarity ?? 75
+          similarity: params.similarity ?? 75,
+          stream: false,
+          audio_encoding: audioEncoding,
+          audio_config: { audio_encoding: audioEncoding }
         };
 
-        // Response comes as concatenated JSON chunks, each like {"result":{"audioContent":"..."}}
-        const axiosInstance = apiClient.getAxiosInstance();
-        const response = await axiosInstance.post<string>(
-          "/tts-synthesize",
-          requestBody,
-          { responseType: "text" }
-        );
+        const axiosInstance = getApiClient().getAxiosInstance();
+        const response = await axiosInstance.post("/tts-synthesize", requestBody, {
+          responseType: "arraybuffer",
+          timeout: 120_000
+        });
 
-        const raw = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
+        const contentType = String(response.headers["content-type"] || "");
+        const buffer = Buffer.from(response.data as ArrayBuffer);
 
-        // Parse concatenated JSON objects by splitting on `}{` boundaries
-        const jsonStrings = raw
-          .replace(/\}\s*\{/g, "}|{")
-          .split("|");
-
-        const audioChunks: string[] = [];
-        for (const chunk of jsonStrings) {
+        // The backend only sends JSON on failure paths; with arraybuffer as
+        // the response type those bytes land here undecoded — detect and
+        // surface the real message instead of treating it as audio.
+        if (contentType.includes("application/json")) {
+          let message = "TTS synthesis failed";
           try {
-            const parsed = JSON.parse(chunk.trim());
-            if (parsed.result?.audioContent) {
-              audioChunks.push(parsed.result.audioContent);
-            }
+            const parsed = JSON.parse(buffer.toString("utf8"));
+            message = parsed?.message || message;
           } catch {
-            // Skip unparseable chunks
+            // fall through with generic message
           }
+          throw new Error(message);
         }
 
-        const audioContent = audioChunks.join("");
-        if (!audioContent) {
-          throw new Error("No audio content received from TTS API");
+        if (buffer.length === 0) {
+          throw new Error("TTS API returned an empty audio response");
         }
 
-        if (params.response_format === ResponseFormat.JSON) {
+        if (buffer.length > MAX_INLINE_AUDIO_BYTES) {
           return {
             content: [{
-              type: "text",
-              text: JSON.stringify({
-                audioContent,
-                text: params.text,
-                voice_id: params.voice_id
-              }, null, 2)
+              type: "text" as const,
+              text: `**Error**: Generated audio is ${(buffer.length / 1024 / 1024).toFixed(1)}MB, too large to return inline. This API does not persist synthesis audio server-side, so there is no URL fallback — shorten the text and try again.`
             }]
           };
         }
 
+        const mimeType = MIME_BY_AUDIO_ENCODING[audioEncoding] || contentType.split(";")[0] || "audio/wav";
+        // Hosted mode: a playable 24h link (chat clients can't play inline audio).
+        const audioUrl = saveTemporaryAudio(buffer, mimeType);
+        if (audioUrl) {
+          const details = {
+            audio_url: audioUrl,
+            expires_in_hours: 24,
+            voice_id: params.voice_id,
+            speed: requestBody.speed,
+            mime_type: mimeType,
+            audio_bytes: buffer.length
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: params.response_format === ResponseFormat.JSON
+                ? JSON.stringify(details, null, 2)
+                : `## TTS Synthesis Complete\n\n**Listen / download:** ${audioUrl}\n(link valid for 24 hours)\n\n**Text:** ${params.text}\n**Voice ID:** ${params.voice_id}\n**Speed:** ${requestBody.speed}\n**Audio:** ${mimeType}, ${(buffer.length / 1024).toFixed(1)} KB\n\nShare the link above with the user so they can play it. It can also be passed to sixtydb_stt_transcribe.`
+            }]
+          };
+        }
+
+        // stdio mode: return the audio inline.
+        const base64Audio = buffer.toString("base64");
+
+        const summary = params.response_format === ResponseFormat.JSON
+          ? JSON.stringify({
+              text: params.text,
+              voice_id: params.voice_id,
+              speed: requestBody.speed,
+              stability: requestBody.stability,
+              similarity: requestBody.similarity,
+              mime_type: mimeType,
+              audio_bytes: buffer.length
+            }, null, 2)
+          : `## TTS Synthesis Complete\n\n**Text:** ${params.text}\n**Voice ID:** ${params.voice_id}\n**Speed:** ${requestBody.speed}\n**Stability:** ${requestBody.stability}\n**Similarity:** ${requestBody.similarity}\n**Audio:** ${mimeType}, ${(buffer.length / 1024).toFixed(1)} KB (attached below)`;
+
         return {
-          content: [{
-            type: "text",
-            text: `## TTS Synthesis Complete\n\n**Text:** ${params.text}\n**Voice ID:** ${params.voice_id}\n**Speed:** ${requestBody.speed}\n**Stability:** ${requestBody.stability}\n**Similarity:** ${requestBody.similarity}\n\nAudio content received (${audioChunks.length} chunks, ${audioContent.length} characters of base64 audio).`
-          }]
+          content: [
+            { type: "text" as const, text: summary },
+            { type: "audio" as const, data: base64Audio, mimeType }
+          ]
         };
       } catch (error) {
         return {
@@ -172,9 +209,7 @@ For JSON format:
     "sixtydb_tts_logs",
     {
       title: "Get TTS History",
-      description: `Retrieve TTS generation history with filtering and pagination.
-
-This tool provides a complete history of all TTS generations made through the account, including credit usage and audio URLs for past syntheses.
+      description: `Retrieve TTS generation history (\`GET /tts/logs\`) — metadata only (text, voice, duration, cost); audio itself is not persisted, so \`audio_url\` will typically be empty.
 
 **Parameters:**
 - voice_id (string, optional): Filter by specific voice ID
@@ -184,47 +219,8 @@ This tool provides a complete history of all TTS generations made through the ac
 - offset (number, optional): Number of results to skip for pagination (default: 0)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
-**Returns:**
-For Markdown format (default):
-- List of TTS generations with details
-- Each entry shows text preview, voice, duration, credits, and date
-
-For JSON format:
-{
-  "total": number,           // Total number of generations
-  "count": number,           // Number in this response
-  "offset": number,          // Current pagination offset
-  "logs": [                  // Array of TTS log entries
-    {
-      "id": string,          // Generation ID
-      "text": string,        // Original text
-      "voice_id": string,    // Voice used
-      "voice_name": string,  // Voice name
-      "audio_url": string,   // Audio download URL
-      "duration": number,    // Duration in seconds
-      "credits_used": number,// Credits charged
-      "created_at": string   // Generation timestamp
-    }
-  ],
-  "has_more": boolean,       // Whether more results exist
-  "next_offset": number      // Next page offset
-}
-
-**Examples:**
-- Recent generations: { "limit": 10 }
-- Filter by voice: { "voice_id": "voice_abc123" }
-- Date range: { "from_date": "2024-01-01T00:00:00Z", "to_date": "2024-01-31T23:59:59Z" }
-- Paginate through results: { "offset": 20, "limit": 20 }
-
-**Use Cases:**
-- Track TTS usage and credit spending
-- Find previously generated audio
-- Analyze voice usage patterns
-- Audit generation history
-
 **Error Handling:**
-- Returns "Error: Authentication required" if API key/JWT is invalid
-- Returns "Error: Invalid date format" for malformed date parameters`,
+- Returns "Error: Authentication required" if the API key is invalid`,
       inputSchema: TTSLogsSchema,
       annotations: {
         title: "Get TTS History",
@@ -238,22 +234,24 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
+        // Backend paginates by `page`, not `offset` — translate.
+        const page = Math.floor(params.offset / params.limit) + 1;
         const queryParams: Record<string, unknown> = {
-          limit: params.limit,
-          offset: params.offset
+          page,
+          limit: params.limit
         };
 
         if (params.voice_id) queryParams.voice_id = params.voice_id;
-        if (params.from_date) queryParams.from_date = params.from_date;
-        if (params.to_date) queryParams.to_date = params.to_date;
+        if (params.from_date) queryParams.date_from = params.from_date;
+        if (params.to_date) queryParams.date_to = params.to_date;
 
         const data = await apiClient.get<{
           logs: unknown[];
-          total: number;
+          pagination: { page: number; limit: number; total: number; pages: number };
         }>("/tts/logs", queryParams);
 
         const logs = data.logs || [];
-        const total = data.total || logs.length;
+        const total = data.pagination?.total ?? logs.length;
         const hasMore = params.offset + logs.length < total;
 
         const formatted = formatTTSLogList(
@@ -291,43 +289,15 @@ For JSON format:
     "sixtydb_tts_get",
     {
       title: "Get TTS Generation Details",
-      description: `Get detailed information about a specific TTS generation.
-
-This tool retrieves complete details for a single TTS generation including the original text, audio URL, duration, and credit usage.
+      description: `Get detailed information about a specific TTS generation (\`GET /tts/{id}\`). \`audio_url\` will typically be empty — synthesis audio isn't persisted server-side.
 
 **Parameters:**
-- id (string, required): TTS generation ID
+- id (string, required): TTS generation ID (the \`hash_id\` from sixtydb_tts_logs)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
-
-**Returns:**
-For Markdown format (default):
-- Complete generation details with audio URL
-- Shows full text, voice used, duration, and credits
-
-For JSON format:
-{
-  "id": string,              // Generation ID
-  "text": string,            // Full original text
-  "voice_id": string,        // Voice ID used
-  "voice_name": string,      // Voice name
-  "audio_url": string,       // Audio download URL
-  "duration": number,        // Duration in seconds
-  "credits_used": number,    // Credits charged
-  "created_at": string       // Generation timestamp
-}
-
-**Examples:**
-- Get generation details: { "id": "tts_abc123" }
-
-**Use Cases:**
-- Retrieve audio URL for download
-- Review generation parameters
-- Check credit usage for specific generation
-- Access original text
 
 **Error Handling:**
 - Returns "Error: Generation not found" if ID doesn't exist (404 status)
-- Returns "Error: Authentication required" if API key/JWT is invalid`,
+- Returns "Error: Authentication required" if the API key is invalid`,
       inputSchema: TTSGetSchema,
       annotations: {
         title: "Get TTS Generation Details",
@@ -341,9 +311,9 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const log = await apiClient.get<unknown>(`/tts/${params.id}`);
+        const body = await apiClient.get<{ success: boolean; data?: unknown }>(`/tts/${encodeURIComponent(params.id)}`);
 
-        const formatted = formatTTSLog(log as any, params.response_format);
+        const formatted = formatTTSLog(body.data, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,

@@ -50,6 +50,14 @@ export class QLabsApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error) => {
+        // Diagnostics for failed upstream calls (stderr; never headers, tokens or bodies).
+        if (axios.isAxiosError(error)) {
+          const method = (error.config?.method || "?").toUpperCase();
+          const path = (error.config?.url || "?").split("?")[0].slice(0, 120);
+          const data = error.response?.data as { message?: unknown } | undefined;
+          const message = typeof data?.message === "string" ? data.message.slice(0, 160) : error.code || "";
+          console.error(`[api] ${method} ${path} -> ${error.response?.status ?? "network"} ${message}`);
+        }
         throw this.handleError(error);
       }
     );

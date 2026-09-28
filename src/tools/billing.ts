@@ -33,25 +33,17 @@ export function registerBillingTools(server: McpServer): void {
       title: "List Invoices",
       description: `List billing invoices with filtering and pagination.
 
-This tool retrieves all invoices for the workspace with payment status, amounts, and download links.
+This tool retrieves invoices for the workspace with payment status, amounts, and download links. There is no date-range filter on this endpoint, and the API does not return a total count — pagination is inferred from whether a full page was returned.
 
 **Parameters:**
 - status ('paid' | 'pending' | 'failed', optional): Filter by payment status
-- from_date (string, optional): Filter by start date (ISO 8601 format)
-- to_date (string, optional): Filter by end date (ISO 8601 format)
 - limit (number, optional): Maximum results to return (1-100, default: 20)
 - offset (number, optional): Number of results to skip for pagination (default: 0)
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Returns:**
-For Markdown format (default):
-- List of invoices with amounts and status
-- Download links for PDF invoices
-- Payment dates and due dates
-
 For JSON format:
 {
-  "total": number,
   "count": number,
   "offset": number,
   "invoices": [
@@ -60,12 +52,16 @@ For JSON format:
       "amount": number,
       "currency": "USD",
       "status": string,
-      "due_date": string,
-      "paid_at": string,
-      "invoice_url": string
+      "plan_name": string,
+      "workspace_name": string,
+      "period_start": string,
+      "period_end": string,
+      "payment_method": string | null,
+      "invoice_url": string | null,
+      "created_at": string
     }
   ],
-  "has_more": boolean,
+  "has_more": boolean,       // best-effort: true when a full page of results was returned
   "next_offset": number
 }
 
@@ -74,7 +70,6 @@ For JSON format:
 **Examples:**
 - Recent invoices: { "limit": 10 }
 - Pending only: { "status": "pending" }
-- Date range: { "from_date": "2024-01-01T00:00:00Z", "to_date": "2024-01-31T23:59:59Z" }
 
 **Error Handling:**
 - Returns "Error: Authentication required" if API key/JWT is invalid`,
@@ -97,22 +92,17 @@ For JSON format:
         };
 
         if (params.status) queryParams.status = params.status;
-        if (params.from_date) queryParams.from_date = params.from_date;
-        if (params.to_date) queryParams.to_date = params.to_date;
 
-        const data = await apiClient.get<{
-          invoices: unknown[];
-          total: number;
-        }>("/billing/invoices", queryParams);
+        // GET /billing/invoices returns { success, message, data: [...] } —
+        // no `total` count is provided by the API.
+        const data = await apiClient.get<{ data: unknown[] }>("/billing/invoices", queryParams);
 
-        const invoices = data.invoices || [];
-        const total = data.total || invoices.length;
-        const hasMore = params.offset + invoices.length < total;
+        const invoices = data.data || [];
+        // Best-effort: a full page suggests more results may exist.
+        const hasMore = invoices.length === params.limit;
 
         const lines: string[] = [];
-        lines.push(`# Invoices (${total} total)`);
-        lines.push("");
-        lines.push(`Showing ${invoices.length} invoices (offset: ${params.offset})`);
+        lines.push(`# Invoices (showing ${invoices.length} at offset ${params.offset})`);
         lines.push("");
 
         for (const invoice of invoices as any) {
@@ -120,12 +110,11 @@ For JSON format:
         }
 
         if (hasMore) {
-          lines.push(`---\n**More results available.** Use offset=${params.offset + invoices.length} to see more.`);
+          lines.push(`---\n**More results may be available.** Use offset=${params.offset + invoices.length} to see more.`);
         }
 
         if (params.response_format === ResponseFormat.JSON) {
           const response = {
-            total,
             count: invoices.length,
             offset: params.offset,
             invoices,
@@ -183,17 +172,21 @@ For JSON format:
   "amount": number,
   "currency": "USD",
   "status": string,
-  "due_date": string,
-  "paid_at": string,
-  "invoice_url": string
+  "plan": { "name": string, "description": string },
+  "workspace": { "name": string },
+  "user": { "name": string, "email": string },
+  "period": { "start": string, "end": string },
+  "payment_method": string | null,
+  "invoice_url": string | null,
+  "created_at": string,
+  "updated_at": string
 }
 
 **Examples:**
 - Get invoice details: { "id": "inv_abc123" }
 
 **Error Handling:**
-- Returns "Error: Invoice not found" if ID doesn't exist (404 status)
-- Returns "Error: Access denied" if invoice belongs to different workspace`,
+- Returns "Error: Invoice not found" if ID doesn't exist (404 status)`,
       inputSchema: InvoiceGetSchema,
       annotations: {
         title: "Get Invoice Details",
@@ -207,9 +200,10 @@ For JSON format:
       try {
         const apiClient = getApiClient();
 
-        const invoice = await apiClient.get<unknown>(`/billing/invoices/${params.id}`);
+        // GET /billing/invoices/:id returns { success, message, data: {...} }.
+        const response = await apiClient.get<{ data: unknown }>(`/billing/invoices/${params.id}`);
 
-        const formatted = formatInvoice(invoice as any, params.response_format);
+        const formatted = formatInvoice(response.data as any, params.response_format);
 
         const { content } = truncateIfNeeded(
           formatted,

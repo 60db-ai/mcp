@@ -81,9 +81,12 @@ export class SixtydbAccountApi {
     try {
       const who = connection.email ? ` · ${connection.email}` : "";
       const name = `${connection.clientName} via ${connection.destination} (MCP connector${who})`.slice(0, 150);
-      const res = await this.post("/developer/api", { name }, { Authorization: `Bearer ${jwt}` });
+      const auth = { Authorization: `Bearer ${jwt}` };
+      const res = await this.post("/developer/api", { name }, auth);
       const apiKey = res.data?.data?.api_key;
       if (res.status >= 200 && res.status < 300 && typeof apiKey === "string") {
+        // Only when the name is user-specific (email known): never touch other users' keys.
+        if (connection.email) await this.deleteOlderConnectorKeys(name, res.data?.data?.hash_id, auth);
         return { apiKey };
       }
       if (res.status === 403) {
@@ -95,6 +98,34 @@ export class SixtydbAccountApi {
       return { error: res.data?.message || "Could not create access for this connection." };
     } catch (error) {
       return { error: (networkError(error) as { message: string }).message };
+    }
+  }
+
+  /**
+   * Reconnecting the same app replaces the user's previous connector key instead of
+   * piling up keys. Matches the exact key name (app + destination + email) and only
+   * "(MCP connector" keys; best effort — a failure just leaves an extra key behind.
+   */
+  private async deleteOlderConnectorKeys(
+    name: string,
+    keepHashId: string | undefined,
+    auth: Record<string, string>
+  ): Promise<void> {
+    if (!keepHashId || !name.includes("(MCP connector")) return;
+    try {
+      const list = await axios.get(`${this.apiBaseUrl}/developer/api`, { headers: auth, timeout: 10_000 });
+      const stale = ((list.data?.data || []) as Array<{ name?: string; hash_id?: string }>).filter(
+        (key) => key.name === name && key.hash_id && key.hash_id !== keepHashId
+      );
+      for (const key of stale) {
+        await axios.delete(`${this.apiBaseUrl}/developer/api/${encodeURIComponent(key.hash_id!)}`, {
+          headers: auth,
+          timeout: 10_000
+        });
+      }
+      if (stale.length) console.log(`[oauth] replaced ${stale.length} older connector key(s)`);
+    } catch (error) {
+      console.error("[oauth] could not clean up older connector keys:", (error as Error).message);
     }
   }
 }

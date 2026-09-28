@@ -39,6 +39,8 @@ export interface LoginPageOptions {
   authRequest: string;
   clientName: string;
   redirectHost: string;
+  /** false = redirect target isn't a known AI app: show a phishing warning. */
+  verified: boolean;
   googleClientId?: string;
   email?: string;
   error?: string;
@@ -59,6 +61,7 @@ google.accounts.id.renderButton(document.getElementById("g"),{theme:"outline",si
     "Sign in",
     `<h1>Sign in to 60db</h1>
 <p class="sub"><b>${esc(o.clientName)}</b> wants to use your 60db account (voices, speech, music, memory) and will return you to <b>${esc(o.redirectHost)}</b>.</p>
+${o.verified ? "" : `<div class="err" role="alert"><b>Unverified app.</b> 60db has not verified this app. Only continue if you started this connection yourself and trust <b>${esc(o.redirectHost)}</b>; it will get access to your 60db workspace.</div>`}
 ${errorBox(o.error)}
 <form method="post" action="/oauth/login">
 <input type="hidden" name="request" value="${esc(o.authRequest)}"><input type="hidden" name="step" value="password">

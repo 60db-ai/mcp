@@ -41,7 +41,12 @@ export function setupMcpOAuth(app: Express, config: McpOAuthConfig): McpOAuthHan
       scopesSupported: ["mcp"],
       resourceName: "60db",
       serviceDocumentationUrl: new URL(config.documentationUrl),
-      clientRegistrationOptions: { clientSecretExpirySeconds: 0 } // DCR secrets never expire
+      // /register and /token are called server-to-server from Claude.ai / ChatGPT's
+      // shared egress IPs, so the SDK's per-IP defaults would lock out all their
+      // users. Both are stateless and cheap here; the browser-facing /authorize and
+      // /oauth/login keep per-IP limits.
+      clientRegistrationOptions: { clientSecretExpirySeconds: 0, rateLimit: false }, // DCR secrets never expire
+      tokenOptions: { rateLimit: false }
     })
   );
   app.use(

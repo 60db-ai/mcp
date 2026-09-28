@@ -10,6 +10,7 @@ import type { SixtydbOAuthProvider, PendingAuthRequest } from "./sixtydb-oauth-p
 import { sendHtml } from "./sixtydb-oauth-provider.js";
 import { SixtydbAccountApi, type LoginResult } from "./sixtydb-account-api.js";
 import { renderErrorPage, renderLoginPage, renderTwoFactorPage } from "./oauth-login-pages.js";
+import { isTrustedRedirect, redirectLabel } from "./oauth-client-policy.js";
 
 const TFA_TTL_MS = 5 * 60 * 1000;
 const field = (body: Record<string, unknown>, name: string, max = 4096): string =>
@@ -30,7 +31,7 @@ export function createOAuthLoginRouter(options: {
     legacyHeaders: false,
     keyGenerator: (req) => ipKeyGenerator(req.ip || "unknown"),
     handler: (_req, res) =>
-      sendHtml(res, renderErrorPage("Too many sign-in attempts. Please wait 15 minutes."), undefined, 429)
+      sendHtml(res, renderErrorPage("Too many sign-in attempts. Please wait 15 minutes."), { status: 429 })
   });
 
   router.post(
@@ -42,15 +43,19 @@ export function createOAuthLoginRouter(options: {
       const sealedRequest = field(body, "request");
       const pending = provider.openAuthRequest(sealedRequest);
       if (!pending) {
-        sendHtml(res, renderErrorPage("This sign-in link has expired."), undefined, 400);
+        sendHtml(res, renderErrorPage("This sign-in link has expired."), { status: 400 });
         return;
       }
+      // `pending` is sealed and was created only after the SDK validated redirect_uri
+      // (including RFC 8252 loopback port matching), so only the client must still exist.
       const client = await provider.clientsStore.getClient(pending.cid);
-      if (!client || !client.redirect_uris.includes(pending.ru)) {
-        sendHtml(res, renderErrorPage("Unknown application. Please reconnect."), undefined, 400);
+      if (!client) {
+        sendHtml(res, renderErrorPage("Unknown application. Please reconnect."), { status: 400 });
         return;
       }
       const clientName = client.client_name || "An AI assistant";
+      const destination = redirectLabel(pending.ru);
+      const page = { googleClientId, redirectUri: pending.ru };
 
       const showLogin = (error: string, email?: string) =>
         sendHtml(
@@ -58,13 +63,13 @@ export function createOAuthLoginRouter(options: {
           renderLoginPage({
             authRequest: sealedRequest,
             clientName,
-            redirectHost: new URL(pending.ru).host,
+            redirectHost: destination,
+            verified: isTrustedRedirect(pending.ru),
             googleClientId,
             email,
             error
           }),
-          googleClientId,
-          400
+          { ...page, status: 400 }
         );
 
       const step = field(body, "step", 16);
@@ -84,8 +89,7 @@ export function createOAuthLoginRouter(options: {
             sendHtml(
               res,
               renderTwoFactorPage({ authRequest: sealedRequest, tfaToken: field(body, "tfa"), error: result.message }),
-              undefined,
-              400
+              { redirectUri: pending.ru, status: 400 }
             );
             return;
           }
@@ -100,24 +104,30 @@ export function createOAuthLoginRouter(options: {
       if (result.kind === "error") return showLogin(result.message, email);
       if (result.kind === "two_factor") {
         const tfaToken = provider.sealer.seal("tfa", { t: result.tempToken }, TFA_TTL_MS);
-        sendHtml(res, renderTwoFactorPage({ authRequest: sealedRequest, tfaToken }));
+        sendHtml(res, renderTwoFactorPage({ authRequest: sealedRequest, tfaToken }), { redirectUri: pending.ru });
         return;
       }
 
-      await completeAuthorization(res, pending, result.jwt, clientName);
+      await completeAuthorization(res, pending, result.jwt, { clientName, destination, email: result.email });
     }
   );
 
-  async function completeAuthorization(res: Response, pending: PendingAuthRequest, jwt: string, clientName: string) {
-    const created = await accountApi.createConnectorApiKey(jwt, clientName);
+  async function completeAuthorization(
+    res: Response,
+    pending: PendingAuthRequest,
+    jwt: string,
+    connection: { clientName: string; destination: string; email?: string }
+  ) {
+    const created = await accountApi.createConnectorApiKey(jwt, connection);
     if ("error" in created) {
-      sendHtml(res, renderErrorPage(created.error), undefined, 403);
+      sendHtml(res, renderErrorPage(created.error), { status: 403 });
       return;
     }
     const redirect = new URL(pending.ru);
     redirect.searchParams.set("code", provider.issueCode(pending, created.apiKey));
     if (pending.st) redirect.searchParams.set("state", pending.st);
-    console.log(`[oauth] connected client "${clientName.slice(0, 60)}" -> ${redirect.host}`);
+    const safeName = connection.clientName.replace(/[^\w .()-]/g, "").slice(0, 60);
+    console.log(`[oauth] connected client "${safeName}" -> ${connection.destination.replace(/[^\w.:-]/g, "")}`);
     res.redirect(303, redirect.toString());
   }
 

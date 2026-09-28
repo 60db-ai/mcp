@@ -14,13 +14,28 @@ import type { AuthorizationParams, OAuthServerProvider } from "@modelcontextprot
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  InvalidClientMetadataError,
+  InvalidGrantError,
+  InvalidTokenError
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { OAuthTokenSealer, fingerprint } from "./oauth-token-sealer.js";
 import { renderLoginPage } from "./oauth-login-pages.js";
+import {
+  formActionSource,
+  isTrustedRedirect,
+  redirectLabel,
+  redirectUriPolicyError,
+  sanitizeClientName
+} from "./oauth-client-policy.js";
 
 const AUTH_REQUEST_TTL_MS = 15 * 60 * 1000;
-const CODE_TTL_MS = 5 * 60 * 1000;
+const CODE_TTL_MS = 2 * 60 * 1000; // stateless codes can't be single-use; keep the window short
 const ACCESS_TOKEN_TTL_S = 60 * 60;
+const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // sliding: every refresh issues a fresh one
+// Prefixes keep sealed tokens distinguishable from raw `sk_` API keys.
+const ACCESS_PREFIX = "60db_at_";
+const REFRESH_PREFIX = "60db_rt_";
 
 /** Pending /authorize request carried through the sign-in form. */
 export interface PendingAuthRequest {
@@ -46,8 +61,13 @@ class StatelessClientsStore implements OAuthRegisteredClientsStore {
   async registerClient(
     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">
   ): Promise<OAuthClientInformationFull> {
+    for (const uri of client.redirect_uris) {
+      const error = redirectUriPolicyError(uri);
+      if (error) throw new InvalidClientMetadataError(error);
+    }
     // Drop any SDK-generated id: the sealed client metadata *is* the client_id.
-    const { client_id: _ignored, ...metadata } = client as OAuthClientInformationFull;
+    const { client_id: _ignored, ...rest } = client as OAuthClientInformationFull;
+    const metadata = { ...rest, client_name: sanitizeClientName(rest.client_name) };
     const issuedAt = Math.floor(Date.now() / 1000);
     const clientId = this.sealer.seal("client", { ...metadata, client_id_issued_at: issuedAt });
     return { ...metadata, client_id: clientId, client_id_issued_at: issuedAt } as OAuthClientInformationFull;
@@ -74,10 +94,11 @@ export class SixtydbOAuthProvider implements OAuthServerProvider {
     const html = renderLoginPage({
       authRequest: this.sealer.seal("authreq", pending, AUTH_REQUEST_TTL_MS),
       clientName: client.client_name || "An AI assistant",
-      redirectHost: new URL(params.redirectUri).host,
+      redirectHost: redirectLabel(params.redirectUri),
+      verified: isTrustedRedirect(params.redirectUri),
       googleClientId: this.googleClientId
     });
-    sendHtml(res, html, this.googleClientId);
+    sendHtml(res, html, { googleClientId: this.googleClientId, redirectUri: params.redirectUri });
   }
 
   openAuthRequest(sealed: string | undefined): PendingAuthRequest | undefined {
@@ -116,7 +137,7 @@ export class SixtydbOAuthProvider implements OAuthServerProvider {
   }
 
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string): Promise<OAuthTokens> {
-    const payload = this.sealer.open<TokenPayload>("refresh", refreshToken);
+    const payload = this.sealer.open<TokenPayload>("refresh", stripPrefix(refreshToken, REFRESH_PREFIX));
     if (!payload || payload.cid !== fingerprint(client.client_id)) {
       throw new InvalidGrantError("Invalid refresh token");
     }
@@ -125,22 +146,22 @@ export class SixtydbOAuthProvider implements OAuthServerProvider {
 
   private issueTokens(payload: TokenPayload): OAuthTokens {
     return {
-      access_token: this.sealer.seal("access", payload, ACCESS_TOKEN_TTL_S * 1000),
+      access_token: ACCESS_PREFIX + this.sealer.seal("access", payload, ACCESS_TOKEN_TTL_S * 1000),
       token_type: "Bearer",
       expires_in: ACCESS_TOKEN_TTL_S,
-      // Refresh tokens don't expire; access ends when the API key is deleted.
-      refresh_token: this.sealer.seal("refresh", payload),
+      // Deleting the connector's API key in the dashboard ends access immediately.
+      refresh_token: REFRESH_PREFIX + this.sealer.seal("refresh", payload, REFRESH_TOKEN_TTL_MS),
       scope: "mcp"
     };
   }
 
   /** The 60db API key behind an OAuth access token, or undefined if invalid/expired. */
   resolveApiKey(accessToken: string): string | undefined {
-    return this.sealer.open<TokenPayload>("access", accessToken)?.k;
+    return this.sealer.open<TokenPayload>("access", stripPrefix(accessToken, ACCESS_PREFIX))?.k;
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const payload = this.sealer.open<TokenPayload>("access", token);
+    const payload = this.sealer.open<TokenPayload>("access", stripPrefix(token, ACCESS_PREFIX));
     if (!payload) throw new InvalidTokenError("Invalid or expired access token");
     return {
       token,
@@ -151,11 +172,23 @@ export class SixtydbOAuthProvider implements OAuthServerProvider {
   }
 }
 
+function stripPrefix(token: string, prefix: string): string | undefined {
+  return token.startsWith(prefix) ? token.slice(prefix.length) : undefined;
+}
+
+export interface HtmlPageOptions {
+  googleClientId?: string;
+  /** When set, the form may redirect only to this client's origin/scheme (CSP form-action). */
+  redirectUri?: string;
+  status?: number;
+}
+
 /** Sends an HTML page with anti-framing + tight CSP (Google Identity allowed when enabled). */
-export function sendHtml(res: Response, html: string, googleClientId?: string, status = 200): void {
-  const google = googleClientId ? " https://accounts.google.com/gsi/" : "";
+export function sendHtml(res: Response, html: string, options: HtmlPageOptions = {}): void {
+  const google = options.googleClientId ? " https://accounts.google.com/gsi/" : "";
+  const redirectTarget = options.redirectUri ? ` ${formActionSource(options.redirectUri)}` : "";
   res
-    .status(status)
+    .status(options.status ?? 200)
     .set({
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -168,7 +201,7 @@ export function sendHtml(res: Response, html: string, googleClientId?: string, s
         `frame-src${google || " 'none'"}`,
         `connect-src${google || " 'none'"}`,
         "img-src https://60db.ai data:",
-        "form-action 'self' https: http://localhost:* http://127.0.0.1:*",
+        `form-action 'self'${redirectTarget}`,
         "frame-ancestors 'none'",
         "base-uri 'none'"
       ].join("; ")

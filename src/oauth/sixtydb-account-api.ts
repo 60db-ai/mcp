@@ -9,7 +9,7 @@
 import axios, { AxiosError } from "axios";
 
 export type LoginResult =
-  | { kind: "token"; jwt: string }
+  | { kind: "token"; jwt: string; email?: string }
   | { kind: "two_factor"; tempToken: string }
   | { kind: "error"; message: string };
 
@@ -29,7 +29,7 @@ export class SixtydbAccountApi {
       return { kind: "two_factor", tempToken: data.temp_token };
     }
     if (status >= 200 && status < 300 && data?.token) {
-      return { kind: "token", jwt: data.token };
+      return { kind: "token", jwt: data.token, email: data.user?.email };
     }
     if (status === 429) {
       return { kind: "error", message: "Too many attempts. Please wait a minute and try again." };
@@ -69,13 +69,18 @@ export class SixtydbAccountApi {
     }
   }
 
-  /** Creates a workspace API key for the signed-in user (primary workspace). */
+  /**
+   * Creates a workspace API key for the signed-in user (primary workspace).
+   * The name identifies app, destination and user so it's recognisable in the
+   * dashboard's API key list.
+   */
   async createConnectorApiKey(
     jwt: string,
-    clientName: string
+    connection: { clientName: string; destination: string; email?: string }
   ): Promise<{ apiKey: string } | { error: string }> {
     try {
-      const name = `${clientName} (MCP connector)`.slice(0, 150);
+      const who = connection.email ? ` · ${connection.email}` : "";
+      const name = `${connection.clientName} via ${connection.destination} (MCP connector${who})`.slice(0, 150);
       const res = await this.post("/developer/api", { name }, { Authorization: `Bearer ${jwt}` });
       const apiKey = res.data?.data?.api_key;
       if (res.status >= 200 && res.status < 300 && typeof apiKey === "string") {

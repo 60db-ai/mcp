@@ -119,7 +119,7 @@ Generation is asynchronous and takes about **1.5-2.5 minutes**. This call return
 - \`vocal_gender\` ('Male' | 'Female', optional)
 - \`voice_id\` (string, optional): A catalog or saved voice ID — see \`sixtydb_music_list_voices\`.
 - \`negative_tags\` (string, optional, ≤1000 chars): Styles to exclude.
-- \`target_duration\` (number, optional, 10-600 seconds): Treated as a hint by the model.
+- \`target_duration\` (60 | 120 | 180, optional): The only lengths the engine accepts. For shorter clips (e.g. a 30s intro) use 60 and trim.
 - \`seed\` (string, optional): Digit string for repeatable results (send as a string — it's 64-bit).
 
 **Important:** in \`advanced\` mode you must supply **exactly one** of \`lyrics\` or \`lyrics_prompt\` unless \`instrumental: true\`. Supplying both, or neither without instrumental, is rejected before any API call.
@@ -171,8 +171,9 @@ Generation is asynchronous and takes about **1.5-2.5 minutes**. This call return
         };
         if (params.lyrics) body.lyrics = params.lyrics;
         if (params.lyrics_prompt) body.lyrics_prompt = params.lyrics_prompt;
-        if (params.vocal_gender) body.vocal_gender = params.vocal_gender;
-        if (params.voice_id) body.voice_id = params.voice_id;
+        // Instrumentals must not name a singer — the engine rejects voice/vocal settings.
+        if (params.vocal_gender && !params.instrumental) body.vocal_gender = params.vocal_gender;
+        if (params.voice_id && !params.instrumental) body.voice_id = params.voice_id;
         if (params.negative_tags) body.negative_tags = params.negative_tags;
         if (params.target_duration != null) body.target_duration = params.target_duration;
         if (params.seed) body.seed = params.seed;

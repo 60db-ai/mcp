@@ -612,11 +612,10 @@ export const MusicCreateSongSchema = z.object({
   negative_tags: z.string().max(MUSIC_NEGATIVE_TAGS_MAX_LENGTH, `Negative tags must not exceed ${MUSIC_NEGATIVE_TAGS_MAX_LENGTH} characters`)
     .optional()
     .describe("Styles to exclude from generation"),
-  target_duration: z.number().int()
-    .min(MUSIC_TARGET_DURATION_MIN)
-    .max(MUSIC_TARGET_DURATION_MAX)
+  // The upstream song engine only accepts these targets (anything else fails validation).
+  target_duration: z.union([z.literal(60), z.literal(120), z.literal(180)])
     .optional()
-    .describe(`Target duration in seconds (${MUSIC_TARGET_DURATION_MIN}-${MUSIC_TARGET_DURATION_MAX}) — treated as a hint by the model`),
+    .describe("Target length in seconds: exactly 60, 120 or 180 (the only values the engine accepts). Omit to let the model decide. Shorter clips aren't supported — generate 60 and trim."),
   seed: z.string().regex(/^\d+$/, "Seed must be a digit string").max(MUSIC_SEED_MAX_LENGTH)
     .optional()
     .describe("Digit string (send as a string — it's 64-bit) for repeatable results"),

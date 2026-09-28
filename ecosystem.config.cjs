@@ -37,8 +37,8 @@ module.exports = {
         // Same box as api.60db.ai: call the API on loopback, skip TLS + nginx hop.
         SIXTYDB_API_BASE_URL: "http://127.0.0.1:4000",
         PUBLIC_MCP_URL: "https://mcp.60db.ai/mcp",
-        // Set to "https://api.60db.ai" once the OAuth authorization server ships.
-        AUTH_SERVER_URL: "",
+        // OAuth secrets are NOT set here: put MCP_OAUTH_SECRET (>= 32 random chars) and
+        // optionally GOOGLE_CLIENT_ID in ~/60db-mcp/.env (gitignored), loaded at startup.
       },
     },
   ],

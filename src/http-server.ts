@@ -19,14 +19,23 @@ import {
   requireBearerAuth
 } from "./http-auth-middleware.js";
 import { DEFAULT_API_BASE_URL, SERVER_VERSION } from "./constants.js";
+import { setupMcpOAuth } from "./oauth/setup-mcp-oauth.js";
+
+// Server-only secrets (MCP_OAUTH_SECRET, GOOGLE_CLIENT_ID) live in an uncommitted .env.
+try {
+  process.loadEnvFile(".env");
+} catch {
+  // no .env file: rely on the process environment
+}
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "127.0.0.1";
 const API_BASE_URL = (process.env.SIXTYDB_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 const PUBLIC_MCP_URL = process.env.PUBLIC_MCP_URL || "https://mcp.60db.ai/mcp";
 const PUBLIC_ORIGIN = new URL(PUBLIC_MCP_URL).origin;
-// Only advertised once the OAuth authorization server (qlabs-api) is live.
-const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || "";
+// OAuth sign-in (Claude.ai / ChatGPT connectors) is enabled when a sealing secret is set.
+const OAUTH_SECRET = process.env.MCP_OAUTH_SECRET || "";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || undefined;
 const LANDING_PAGE_URL = "https://60db.ai/mcp";
 const RESOURCE_METADATA_URL = `${PUBLIC_ORIGIN}/.well-known/oauth-protected-resource/mcp`;
 
@@ -50,14 +59,33 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.get("/",(_req, res) => res.redirect(302, LANDING_PAGE_URL));
+app.get("/", (_req, res) => res.redirect(302, LANDING_PAGE_URL));
 app.get("/health", (_req, res) => res.json({ status: "ok", version: SERVER_VERSION }));
 
-// RFC 9728 protected resource metadata (both the root and path-suffixed forms).
+// OAuth 2.1 sign-in for Claude.ai / ChatGPT connectors (see oauth/setup-mcp-oauth.ts).
+const oauth = OAUTH_SECRET
+  ? setupMcpOAuth(app, {
+      secret: OAUTH_SECRET,
+      publicOrigin: PUBLIC_ORIGIN,
+      publicMcpUrl: PUBLIC_MCP_URL,
+      apiBaseUrl: API_BASE_URL,
+      documentationUrl: LANDING_PAGE_URL,
+      googleClientId: GOOGLE_CLIENT_ID
+    })
+  : undefined;
+
+/** Bearer → 60db API key: raw sk_ keys pass through, OAuth tokens are unsealed. */
+const resolveOAuthToken = oauth?.resolveApiKey;
+const bearerApiKey = (req: Request): string | undefined => {
+  const bearer = extractBearerToken(req);
+  return bearer && !bearer.startsWith("sk_") ? resolveOAuthToken?.(bearer) : bearer;
+};
+
+// RFC 9728 protected resource metadata (root form; the SDK router serves /mcp suffix when OAuth is on).
 const protectedResourceMetadata = (_req: Request, res: Response) => {
   res.json({
     resource: PUBLIC_MCP_URL,
-    authorization_servers: AUTH_SERVER_URL ? [AUTH_SERVER_URL] : [],
+    authorization_servers: oauth ? [oauth.issuer] : [],
     bearer_methods_supported: ["header"],
     scopes_supported: ["mcp"],
     resource_name: "60db",
@@ -77,7 +105,7 @@ const failedAuthLimiter = rateLimit({
   limit: Number(process.env.MCP_FAILED_AUTH_PER_MIN || 30),
   skipSuccessfulRequests: true,
   // Verified tokens cost nothing to check, so they are never blocked by others' failures.
-  skip: (req) => isRecentlyVerifiedToken(extractBearerToken(req)),
+  skip: (req) => isRecentlyVerifiedToken(bearerApiKey(req)),
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip || "unknown"),
@@ -101,7 +129,7 @@ const safeLogValue = (value: unknown): string =>
 app.post(
   "/mcp",
   failedAuthLimiter,
-  requireBearerAuth({ apiBaseUrl: API_BASE_URL, resourceMetadataUrl: RESOURCE_METADATA_URL }),
+  requireBearerAuth({ apiBaseUrl: API_BASE_URL, resourceMetadataUrl: RESOURCE_METADATA_URL, resolveOAuthToken }),
   perTokenLimiter,
   express.json({ limit: "2mb" }), // parse only after the caller is authenticated
   async (req: Request, res: Response) => {
@@ -171,5 +199,5 @@ app.listen(PORT, HOST, (error?: Error) => {
     process.exit(1);
   }
   console.log(`60db MCP HTTP server v${SERVER_VERSION} listening on http://${HOST}:${PORT}/mcp`);
-  console.log(`Public URL: ${PUBLIC_MCP_URL} | API: ${API_BASE_URL} | OAuth AS: ${AUTH_SERVER_URL || "(disabled)"}`);
+  console.log(`Public URL: ${PUBLIC_MCP_URL} | API: ${API_BASE_URL} | OAuth: ${oauth ? `enabled${GOOGLE_CLIENT_ID ? " (+Google)" : ""}` : "disabled (set MCP_OAUTH_SECRET)"}`);
 });

@@ -21,7 +21,11 @@ const validTokenCache = new Map<string, number>();
 export interface BearerAuthOptions {
   apiBaseUrl: string;
   resourceMetadataUrl: string;
+  /** Maps an OAuth access token to the 60db API key it carries (undefined = invalid/expired). */
+  resolveOAuthToken?: (token: string) => string | undefined;
 }
+
+const isApiKey = (token: string): boolean => token.startsWith("sk_");
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -86,7 +90,15 @@ function sendUnauthorized(res: Response, resourceMetadataUrl: string, descriptio
 
 export function requireBearerAuth(options: BearerAuthOptions) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const token = extractBearerToken(req);
+    const bearer = extractBearerToken(req);
+    // OAuth access tokens are sealed and carry the API key; raw sk_ keys pass through.
+    const token = bearer && !isApiKey(bearer) && options.resolveOAuthToken
+      ? options.resolveOAuthToken(bearer)
+      : bearer;
+    if (bearer && !token) {
+      sendUnauthorized(res, options.resourceMetadataUrl, "Access token is invalid or expired.");
+      return;
+    }
     if (!token) {
       sendUnauthorized(
         res,

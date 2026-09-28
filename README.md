@@ -37,7 +37,9 @@ claude mcp add --transport http 60db https://mcp.60db.ai/mcp \
   "headers": { "Authorization": "Bearer YOUR_60DB_API_KEY" } } } }
 ```
 
-Requests without a valid token get `401` with an RFC 9728 `WWW-Authenticate: Bearer resource_metadata=...` challenge (OAuth sign-in is coming).
+**Claude.ai / ChatGPT / Claude Desktop (one-click):** add a custom connector with the URL above and click Connect. A 60db sign-in page opens (email + password, 2FA, optional Google). After sign-in the server mints a workspace API key named after the client (e.g. "Claude (MCP connector)") and the client receives an OAuth access token carrying it. Deleting that key in the dashboard disconnects the client.
+
+The OAuth 2.1 server is stateless (AES-256-GCM sealed client ids, codes and tokens; PKCE S256; Dynamic Client Registration) and is enabled when `MCP_OAUTH_SECRET` is set. Unauthenticated requests get `401` with an RFC 9728 `WWW-Authenticate: Bearer resource_metadata=...` challenge.
 
 ## Local installation (stdio)
 
@@ -76,7 +78,7 @@ npm run dev:http   # development
 npm run start:http # production; see ecosystem.config.cjs for pm2
 ```
 
-HTTP server env: `PORT` (8787), `HOST` (127.0.0.1), `SIXTYDB_API_BASE_URL`, `PUBLIC_MCP_URL`, `AUTH_SERVER_URL` (OAuth authorization server, empty until enabled), `MCP_RATE_LIMIT_PER_MIN` (120).
+HTTP server env: `PORT` (8787), `HOST` (127.0.0.1), `SIXTYDB_API_BASE_URL`, `PUBLIC_MCP_URL`, `MCP_OAUTH_SECRET` (enables OAuth sign-in; keep in `.env`), `GOOGLE_CLIENT_ID` (optional Google button; the origin must be authorized in Google Cloud), `MCP_RATE_LIMIT_PER_MIN` (120), `MCP_FAILED_AUTH_PER_MIN` (30).
 
 Smoke test a running endpoint:
 

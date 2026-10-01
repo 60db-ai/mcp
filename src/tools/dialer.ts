@@ -5,12 +5,19 @@
  *   - Account status, number search/purchase/release, caller ID
  *   - Call history and call detail lookup ("reserve call", not "make a call")
  *   - Recordings: list, get a short-lived playback URL, get a transcript
- *   - Billing: usage + active number subscriptions
+ *   - Billing: balance + pay-as-you-go rates, usage, and active number subscriptions
+ *
+ * Dialer spends its OWN prepaid balance (`workspace.dialer_balance_usd`), kept
+ * entirely separate from AI credits/plan wallet — a number purchase or call
+ * never touches the AI wallet, and AI services never touch this balance.
+ * Topping it up is a Dashboard action (Billing -> Dialer), same as the
+ * general wallet; this MCP server has no top-up tool.
  *
  * Safety rules enforced here:
  *   - No SIP credentials or trunk/webhook endpoints are exposed via MCP.
  *   - Buying or releasing a number requires an explicit confirm:true — real
- *     money moves ($6.00/number/month, billed immediately on purchase).
+ *     money moves ($6.00/number/month, billed immediately on purchase from
+ *     the Dialer balance).
  *   - Buying a number also requires approved Dialer KYC, which can only be
  *     completed inside the 60db app (Dialer -> KYC) — there is no API for it,
  *     so this MCP server intentionally exposes no KYC tools.
@@ -30,6 +37,7 @@ import {
   DialerGetRecordingUrlSchema,
   DialerGetRecordingTranscriptSchema,
   DialerGetUsageSchema,
+  DialerGetBalanceSchema,
   DialerStatusParams,
   DialerSearchNumbersParams,
   DialerListNumbersParams,
@@ -42,6 +50,7 @@ import {
   DialerGetRecordingUrlParams,
   DialerGetRecordingTranscriptParams,
   DialerGetUsageParams,
+  DialerGetBalanceParams,
 } from "../schemas/index.js";
 import { getApiClient } from "../services/api-client.js";
 import { formatErrorMessage, truncateIfNeeded } from "../services/response-formatter.js";
@@ -202,7 +211,7 @@ Use \`sixtydb_dialer_buy_number\` to purchase one.`,
       title: "Buy a phone number",
       description: `Purchase a Dialer phone number from the shared pool. **This spends real money and requires approved KYC.**
 
-**Costs:** $6.00 charged immediately, then $6.00/month recurring. If the wallet balance is too low the purchase is rolled back (402 \`RECHARGE_REQUIRED\`).
+**Costs:** $6.00 charged immediately, then $6.00/month recurring — from the workspace's separate **Dialer balance**, never from AI credits. If that balance is too low the purchase is rolled back (402 \`RECHARGE_REQUIRED\`); check it first with \`sixtydb_dialer_get_balance\`.
 
 **Requires approved Dialer KYC**, completed inside the **60db app** (Dialer -> KYC) — KYC cannot be done through this API or any MCP tool.
 
@@ -213,7 +222,7 @@ Use \`sixtydb_dialer_buy_number\` to purchase one.`,
 
 **Error Handling:**
 - 403 \`DIALER_KYC_REQUIRED\` / \`DIALER_KYC_PENDING\` / \`DIALER_KYC_REJECTED\`: complete or wait for KYC approval in the 60db app (Dialer -> KYC)
-- 402 \`RECHARGE_REQUIRED\`: top up the workspace wallet
+- 402 \`RECHARGE_REQUIRED\`: top up the Dialer balance (60db app -> Billing -> Dialer) — this is separate from the AI credits wallet
 - 409 \`POOL_EMPTY\` / \`NUMBER_NOT_AVAILABLE\` / \`DIALER_NOT_PROVISIONED\`: pool exhausted, number taken, or trunk not set up`,
       inputSchema: DialerBuyNumberSchema,
       annotations: {
@@ -227,7 +236,7 @@ Use \`sixtydb_dialer_buy_number\` to purchase one.`,
     async (params: DialerBuyNumberParams) => {
       if (params.confirm !== true) {
         return errorResult(
-          `**Confirmation required**: buying a Dialer number charges **$6.00 now**, then **$6.00/month** recurring.\n\n` +
+          `**Confirmation required**: buying a Dialer number charges **$6.00 now**, then **$6.00/month** recurring, from the workspace's **Dialer balance** (separate from AI credits).\n\n` +
           `It also requires **approved Dialer KYC**, completed inside the **60db app** (Dialer -> KYC) — KYC cannot be done via this API or any MCP tool.\n\n` +
           `Call this tool again with \`confirm: true\`${params.number ? ` and \`number: "${params.number}"\`` : ""} to proceed.`
         );
@@ -502,7 +511,9 @@ Use \`sixtydb_dialer_buy_number\` to purchase one.`,
     "sixtydb_dialer_get_usage",
     {
       title: "Get dialer billing usage",
-      description: `Combined Dialer billing summary: wallet balance + recent charges (from \`GET /dialer/usage\`) plus active number subscriptions (from \`GET /dialer/subscriptions\`).
+      description: `Combined Dialer billing summary: Dialer balance + recent charges (from \`GET /dialer/usage\`) plus active number subscriptions (from \`GET /dialer/subscriptions\`).
+
+The Dialer balance is a separate prepaid balance from AI credits — use \`sixtydb_dialer_get_balance\` for pay-as-you-go rates and a longer ledger (including top-ups).
 
 **Parameters:**
 - \`limit\` (number, optional, 1-200, default 50): Max charge entries to return
@@ -538,6 +549,44 @@ Use \`sixtydb_dialer_buy_number\` to purchase one.`,
           ...subscriptions.map((sub: any) => `- ${sub.e164} — ${sub.status}${sub.next_charge_at ? ` — next charge: ${sub.next_charge_at}` : ""}${sub.past_due_since ? ` — past due since: ${sub.past_due_since}` : ""}`),
         ].join("\n");
         return respond(md, { usage: u, subscriptions: s }, params.response_format);
+      } catch (error) {
+        return handleDialerError(error);
+      }
+    }
+  );
+
+  // ── sixtydb_dialer_get_balance ──────────────────────────
+  server.registerTool(
+    "sixtydb_dialer_get_balance",
+    {
+      title: "Get dialer balance",
+      description: `The workspace's **Dialer balance** — a separate prepaid balance (USD) that pays for number rentals and call minutes. It is entirely independent of AI credits/plan wallet: buying a number or making a call never touches AI credits, and AI services never touch this balance.
+
+**Returns:** \`balance_usd\`, \`balance_inr\` (flat ₹100 = $1), \`rates: { number_monthly_inr, call_per_minute_inr }\`, and \`ledger\` — up to the last 20 entries across rentals, calls, top-ups and admin grants to this balance (a superset of \`sixtydb_dialer_get_usage\`'s charge-only list).
+
+Check this before \`sixtydb_dialer_buy_number\` to confirm there's enough to cover the $6.00 purchase. There is no top-up tool here — recharge from the 60db app (Billing -> Dialer).`,
+      inputSchema: DialerGetBalanceSchema,
+      annotations: {
+        title: "Get balance",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (params: DialerGetBalanceParams) => {
+      try {
+        const data = await getApiClient().get<any>("/billing/dialer");
+        const d = data.data || data;
+        const ledger = d.ledger || [];
+        const md = [
+          `**Dialer balance**: $${(d.balance_usd ?? 0).toFixed?.(2) ?? d.balance_usd} (₹${d.balance_inr ?? "?"})`,
+          `**Rates**: ₹${d.rates?.number_monthly_inr ?? "?"}/number/month · ₹${d.rates?.call_per_minute_inr ?? "?"}/minute`,
+          "",
+          `**Recent ledger (${ledger.length}):**`,
+          ...ledger.map((e: any) => `- ${e.service_type} — ${e.amount_deducted} (units: ${e.units_used}) — balance after: ${e.new_balance} — ${e.created_at}`),
+        ].join("\n");
+        return respond(md, data, params.response_format);
       } catch (error) {
         return handleDialerError(error);
       }

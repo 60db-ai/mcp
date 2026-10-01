@@ -153,6 +153,20 @@ MCP_URL=https://mcp.60db.ai/mcp SIXTYDB_API_KEY=sk_live_... node scripts/smoke-t
 - `sixtydb_dialer_get_recording_url` - Get a short-lived (~5 min) recording playback URL
 - `sixtydb_dialer_get_recording_transcript` - Get (or generate) a recording transcript
 - `sixtydb_dialer_get_usage` - Combined billing usage + active number subscriptions
+- `sixtydb_dialer_get_balance` - Dialer's separate prepaid balance (USD), pay-as-you-go rates, and ledger — independent of AI credits
+
+#### Judge
+- `sixtydb_judge_evaluate` - Score content against a rubric of choice/score/noul questions (inline or saved `rubric_id`)
+- `sixtydb_judge_extract` - Classify a conversational turn into intent/operation and extract entity spans
+- `sixtydb_judge_list_models` - List model names `sixtydb_judge_evaluate` accepts
+- `sixtydb_judge_list_rubrics` - List saved rubrics (yours + workspace-shared)
+- `sixtydb_judge_create_rubric` - Save a rubric for reuse by `rubric_id`
+- `sixtydb_judge_delete_rubric` - Soft-delete a saved rubric
+- `sixtydb_judge_list_runs` - List judge run history, including the low-confidence review queue (`needs_review`)
+- `sixtydb_judge_get_run` - Get one run in full (content judged, request sent, full answer)
+- `sixtydb_judge_delete_run` - Delete a run from history
+- `sixtydb_judge_usage` - Net Judge spend and saved-run counts
+- `sixtydb_judge_health` - Judge upstream readiness + circuit-breaker state (owner/admin only)
 
 ## Response Formats
 

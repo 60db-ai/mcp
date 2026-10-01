@@ -137,6 +137,7 @@ export const TTSSynthesizeSchema = z.object({
     .optional()
     .describe("Voice similarity 0-100 (default 75)"),
   output_format: z.enum(["mp3", "wav", "ogg"]).optional().describe("Audio output format (default 'wav' — the only encoding confirmed supported by the backend; 'mp3'/'ogg' are passed through best-effort)"),
+  model_id: z.string().optional().describe("Synthesis model (default '60db-quality-v01', matching the 60db app's own TTS requests). Override only for a voice that's known to need a different model, e.g. an Indic-language voice may need 'indic_tts_v1'."),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format")
@@ -747,6 +748,11 @@ export const DialerGetUsageSchema = z.object({
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
 }).strict();
 export type DialerGetUsageParams = z.infer<typeof DialerGetUsageSchema>;
+
+export const DialerGetBalanceSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type DialerGetBalanceParams = z.infer<typeof DialerGetBalanceSchema>;
 
 // ============================================================================
 // Judge Schemas

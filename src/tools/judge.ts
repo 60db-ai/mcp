@@ -184,7 +184,7 @@ Use it when you need a **number you can average, sort or threshold**: scoring ca
 **Cost:** billed per input token. The shared content is re-encoded **once per question**, so a 10-question rubric costs ten times the transcript. Keep rubrics tight on long content.
 
 **Error Handling:**
-- 400: invalid rubric — the message names the offending question. Also returned if the content exceeds the model's 8K-token-per-question context.
+- 400: invalid rubric — the message names the offending question. Also returned if the content exceeds the model's 200,000-token-per-question context (in practice, the whole request's 512 KiB cap is what you'll actually hit first).
 - 402: insufficient credits (the shortfall is reported)
 - 404: unknown \`rubric_id\`
 - 429 / 503: the judge is busy or unavailable — retry. The charge is refunded automatically.`,

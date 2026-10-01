@@ -14,8 +14,8 @@ module.exports = {
     {
       name: "60db-mcp",
       script: "./dist/http-server.js",
-      exec_mode: "cluster", // stateless server, safe to run several workers
-      instances: 2,
+      exec_mode: "cluster", // stateless server; cluster mode keeps pm2 reload zero-downtime
+      instances: 1,
       max_memory_restart: "512M",
       kill_timeout: 10000,
       autorestart: true,

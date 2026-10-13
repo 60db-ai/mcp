@@ -137,6 +137,7 @@ export const TTSSynthesizeSchema = z.object({
     .optional()
     .describe("Voice similarity 0-100 (default 75)"),
   output_format: z.enum(["mp3", "wav", "ogg"]).optional().describe("Audio output format (default 'wav' — the only encoding confirmed supported by the backend; 'mp3'/'ogg' are passed through best-effort)"),
+  audio_enhance: z.boolean().optional().describe("Polish the generated audio (default true). Set false to skip it for the fastest result"),
   model_id: z.string().optional().describe("Synthesis model (default '60db-quality-v01', matching the 60db app's own TTS requests). Override only for a voice that's known to need a different model, e.g. an Indic-language voice may need 'indic_tts_v1'."),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)

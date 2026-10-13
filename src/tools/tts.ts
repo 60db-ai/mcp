@@ -149,6 +149,7 @@ Returns a **playable audio link** (valid 24 hours) on the hosted server — alwa
 - stability (number, optional): Voice stability 0-100 (default: 50)
 - similarity (number, optional): Voice similarity 0-100 (default: 75)
 - output_format (string, optional): 'wav' (default, confirmed supported), 'mp3' or 'ogg' (best-effort — the upstream may ignore this and return raw samples anyway, which are then delivered as a .wav regardless of what was requested)
+- audio_enhance (boolean, optional): Polish the generated audio (default: true). Set false to skip it for the fastest result
 - model_id (string, optional): Synthesis model (default '60db-quality-v01', matching the 60db app). Only override for a voice known to need a different one.
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
@@ -179,6 +180,8 @@ Returns a **playable audio link** (valid 24 hours) on the hosted server — alwa
           stability: params.stability ?? 50,
           similarity: params.similarity ?? 75,
           stream: false,
+          // Sent explicitly (on unless the caller opts out) so we don't depend on the backend's default.
+          audio_enhance: params.audio_enhance ?? true,
           audio_encoding: audioEncoding,
           audio_config: { audio_encoding: audioEncoding, sample_rate_hertz: SAMPLE_RATE_HERTZ }
         };
@@ -234,6 +237,8 @@ Returns a **playable audio link** (valid 24 hours) on the hosted server — alwa
               voice_id: params.voice_id,
               speed: requestBody.speed,
               mime_type: mimeType,
+              sample_rate: SAMPLE_RATE_HERTZ,
+              audio_enhance: requestBody.audio_enhance,
               audio_bytes: buffer.length
             };
             return {
@@ -241,7 +246,7 @@ Returns a **playable audio link** (valid 24 hours) on the hosted server — alwa
                 type: "text" as const,
                 text: params.response_format === ResponseFormat.JSON
                   ? JSON.stringify(details, null, 2)
-                  : `## TTS Synthesis Complete\n\n**Listen / download:** ${audioUrl}\n(link valid for 24 hours)\n\n**Text:** ${params.text}\n**Voice ID:** ${params.voice_id}\n**Speed:** ${requestBody.speed}\n**Audio:** ${mimeType}, ${(buffer.length / 1024).toFixed(1)} KB\n\nShare the link above with the user so they can play it. It can also be passed to sixtydb_stt_transcribe.`
+                  : `## TTS Synthesis Complete\n\n**Listen / download:** ${audioUrl}\n(link valid for 24 hours)\n\n**Text:** ${params.text}\n**Voice ID:** ${params.voice_id}\n**Speed:** ${requestBody.speed}\n**Audio:** ${mimeType}, ${SAMPLE_RATE_HERTZ / 1000} kHz, ${(buffer.length / 1024).toFixed(1)} KB\n**Audio enhancement:** ${requestBody.audio_enhance ? "on" : "off"}\n\nShare the link above with the user so they can play it. It can also be passed to sixtydb_stt_transcribe.`
               }]
             };
           }

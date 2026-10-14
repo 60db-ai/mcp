@@ -49,7 +49,7 @@ Use this tool **before** attempting a destructive or gated action to check wheth
 
 1. Call \`sixtydb_get_permissions\` once per session to cache the map
 2. Check \`permissions.memory.create\` before offering a "save to memory" button
-3. Check \`permissions.workspace["billing:manage"]\` before showing wallet top-up UI
+3. Check \`permissions.workspace["billing:manage"]\` before showing top-up UI (credit top-ups are available on the Creator and Pro plans only)
 4. Hide features the role can't use rather than letting the user click and get a 403
 
 **Returns:**
@@ -120,7 +120,7 @@ This is a local check against the permission map returned by \`sixtydb_get_permi
   - \`tts\`, \`stt\` — voice synthesis/transcription
   - \`voices\` — voice library and cloning
   - \`workspace\` — workspace-level actions (invite, billing, delete)
-  - \`billing\` — top-up, subscription management
+  - \`billing\` — top-up (Creator and Pro only), subscription management
   - \`developer_api\` — API key management
   - \`analytics\` — usage analytics
   - \`platform\` — superadmin actions
@@ -135,7 +135,7 @@ This is a local check against the permission map returned by \`sixtydb_get_permi
 - Offering UI features that require specific roles
 - Batching operations (skip the ones that will 403)
 - Prompting the user to upgrade their role
-- Deciding whether to top up the wallet before a billable op`,
+- Deciding whether to offer a credit top-up before a billable op (Creator and Pro only)`,
       inputSchema: AuthzCheckSchema,
       annotations: {
         title: "Check permission",

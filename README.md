@@ -92,6 +92,9 @@ MCP_URL=https://mcp.60db.ai/mcp SIXTYDB_API_KEY=sk_live_... node scripts/smoke-t
 - `60db_list_voices` - List available voices with filtering
 - `60db_get_voice` - Get detailed voice information
 - `60db_create_voice` - Create a cloned voice
+- `sixtydb_get_voice_quota` - Instant and professional voice limits for your plan
+- `sixtydb_list_professional_voices` - Your professional voices and their status
+- `sixtydb_get_marketplace_eligibility` - Plan, KYC and bank checklist for marketplace listing
 
 #### Text-to-Speech
 - `60db_tts_synthesize` - Convert text to speech

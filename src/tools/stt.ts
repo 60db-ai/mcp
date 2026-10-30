@@ -163,6 +163,7 @@ The backend only accepts a file upload (multipart/form-data) — there is no URL
 - language (string, optional): ISO 639-1 code (e.g. \`en\`, \`hi\`, \`ar\`, \`fr\`). **Omit this field OR pass \`"auto"\`** to enable auto-detection across the 39 supported languages. Specifying a single supported language skips language identification entirely for lowest latency.
 - diarize (boolean, optional): Enable pyannote speaker diarization. When \`true\`, each segment in the response includes a \`speakers\` array with \`SPEAKER_00\`, \`SPEAKER_01\`, … labels. Adds ~50–150 ms of processing latency.
 - context (string, optional): Free-form paragraph describing the session (domain, speakers, jargon) that opens the server-side LLM refinement gate (requires a paid plan — ignored with a warning on the Free plan). When supplied, response text is polished for proper nouns, filler removal, and punctuation. Omit to skip refinement. Example: \`"Cricket coaching session. Players: Arjun Mehta, Ishaan Verma. Discussing batting technique."\`.
+- cache (boolean, optional): Re-upload cache (server default true). Identical audio + options from the same workspace within 30 days returns the stored transcript at the STT cached rate; the result shows \`Cached: yes\`. Pass false to opt out.
 - response_format ('markdown' | 'json', optional): Output format (default: 'markdown')
 
 **Auto-detect:**
@@ -195,7 +196,8 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
   "warnings": array,            // Non-fatal warnings (e.g. no_speech_detected)
   "warning_codes": string[],    // Flat list of warning codes for quick checks
   "hash_id": string,            // ID to use with sixtydb_stt_get
-  "has_audio": boolean          // Whether the source audio was archived server-side
+  "has_audio": boolean,         // Whether the source audio was archived server-side
+  "cached": boolean             // true when served from the re-upload cache
 }
 \`\`\`
 
@@ -246,6 +248,8 @@ The most reliable way to auto-detect is to **omit the \`language\` field entirel
 
         const contextStr = params.context && params.context.trim() ? params.context.trim() : undefined;
         if (contextStr) form.append("context", contextStr);
+
+        if (params.cache !== undefined) form.append("cache", String(params.cache));
 
         const axiosInstance = getApiClient().getAxiosInstance();
         const response = await axiosInstance.post("/stt", form, {

@@ -296,7 +296,7 @@ Calls \`GET /get-voices\`, which returns the FULL accessible catalog (not pagina
 
 The sample audio is downloaded from \`sample_audio_url\` and re-uploaded to the API — the backend only accepts a file upload, not a URL field. This is synchronous and can take **1-3 minutes** (the backend transcribes the sample and calls the voice-cloning provider before responding — there is no job ID to poll).
 
-**Note:** requires a non-empty workspace wallet balance and counts against the workspace's zero-shot voice creation limit (plan-dependent).
+**Note:** requires a non-empty workspace wallet balance and counts against the workspace's instant (zero-shot) voice limit: 1 voice on Free/Starter/Flow, 10 on Creator/Pro (plus any bonus granted by support). The limit counts live voices; deleting one frees a slot.
 
 **Parameters:**
 - name (string, required): Name for the cloned voice (1-100 characters)
@@ -312,7 +312,7 @@ The sample audio is downloaded from \`sample_audio_url\` and re-uploaded to the 
 
 **Error Handling:**
 - Returns "Error: ... Workspace wallet is empty" (402) if the wallet has no balance
-- Returns "Error: ... limit reached" (429) if the zero-shot voice cap is hit
+- Returns "Error: ... (code: VOICE_LIMIT_REACHED)" (403) if the instant voice limit is reached; upgrade to Creator/Pro or delete a voice
 - Returns "Error: Invalid audio URL" if the sample audio is inaccessible
 - Returns "Error: Authentication required" if the API key is invalid`,
       inputSchema: VoiceCreateSchema,

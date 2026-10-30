@@ -93,6 +93,13 @@ export const VoiceGetSchema = z.object({
 
 export type VoiceGetParams = z.infer<typeof VoiceGetSchema>;
 
+/** Read-only voice limit / professional voice tools take only an output format. */
+export const VoiceReadOnlySchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN).describe("Output format")
+}).strict();
+
+export type VoiceReadOnlyParams = z.infer<typeof VoiceReadOnlySchema>;
+
 export const VoiceCreateSchema = z.object({
   name: z.string()
     .min(VOICE_NAME_MIN_LENGTH, "Voice name is required")
@@ -187,6 +194,11 @@ export const STTTranscribeSchema = z.object({
     "proper nouns, filler removal, and punctuation. Omit to skip refinement. " +
     "NOTE: this is the REST /v1/transcribe shape — the WebSocket /v1/stream " +
     "endpoint takes a structured {general, text, terms} object instead."
+  ),
+  cache: z.boolean().optional().describe(
+    "Re-upload cache (server default: true). Byte-identical audio with the same options " +
+    "from the same workspace within 30 days returns the stored transcript at the STT cached rate. " +
+    "Pass false to opt out."
   ),
   response_format: ResponseFormatSchema
     .default(ResponseFormat.MARKDOWN)

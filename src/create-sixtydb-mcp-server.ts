@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 
 import { registerVoiceTools } from "./tools/voices.js";
+import { registerProfessionalVoiceTools } from "./tools/professional-voices.js";
 import { registerTTSTools } from "./tools/tts.js";
 import { registerSTTTools } from "./tools/stt.js";
 import { registerWorkspaceTools } from "./tools/workspaces.js";
@@ -35,6 +36,7 @@ export function createSixtydbMcpServer(options: CreateServerOptions = {}): McpSe
   });
 
   registerVoiceTools(server);
+  registerProfessionalVoiceTools(server);
   registerTTSTools(server);
   registerSTTTools(server);
   registerWorkspaceTools(server);

@@ -295,6 +295,7 @@ export function formatSTTLog(
   lines.push(`- **Duration**: ${formatDuration(duration)}`);
   if (log?.cost_usd != null) lines.push(`- **Cost**: ${formatCost(log.cost_usd)}`);
   if (log?.status) lines.push(`- **Status**: ${log.status}`);
+  if (log?.cached === true) lines.push(`- **Cached**: yes (stored transcript returned)`);
   if (log?.created_at) lines.push(`- **Created**: ${formatDate(log.created_at)}`);
   if (Array.isArray(log?.warning_codes) && log.warning_codes.length > 0) {
     lines.push(`- **Warnings**: ${log.warning_codes.join(", ")}`);
@@ -456,6 +457,9 @@ export function formatUsageStats(
     lines.push(`## Usage Summary`);
     lines.push(`- **TTS Characters**: ${(summary.tts_characters || 0).toLocaleString()}`);
     lines.push(`- **STT Minutes**: ${(summary.stt_minutes || 0).toLocaleString()}`);
+    if (summary.llm_cached_tokens) {
+      lines.push(`- **LLM Cached Tokens**: ${Number(summary.llm_cached_tokens).toLocaleString()}`);
+    }
     lines.push(`- **Total Cost**: $${(summary.total_cost_usd || 0).toFixed(2)}`);
     lines.push(`- **Plan**: ${summary.plan || 'Free'}`);
     lines.push("");

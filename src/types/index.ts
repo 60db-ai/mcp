@@ -179,6 +179,7 @@ export interface UsageStats {
   tts_credits_used: number;
   stt_credits_used: number;
   llm_credits_used: number;
+  llm_cached_tokens?: number;
   total_credits_used: number;
   credits_remaining: number;
   period: {

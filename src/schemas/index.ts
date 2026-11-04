@@ -39,6 +39,16 @@ import {
   MUSIC_LIST_VOICES_DEFAULT_LIMIT,
   MUSIC_LIST_VOICES_MAX_LIMIT,
   E164_REGEX,
+  AGENT_NAME_MAX_LENGTH,
+  AGENT_SCRIPT_MAX_LENGTH,
+  AGENT_GREETING_MAX_LENGTH,
+  AGENT_VOICE_ID_MAX_LENGTH,
+  AGENT_MAX_LANGUAGES,
+  AGENT_MAX_TOOLS,
+  AGENT_TOOL_DESCRIPTION_MAX_LENGTH,
+  AGENT_LIST_DEFAULT_LIMIT,
+  AGENT_LIST_MAX_LIMIT,
+  AGENT_CALL_STATUSES,
   DIALER_LOGS_MAX_LIMIT,
   DIALER_LOGS_DEFAULT_LIMIT,
   DIALER_RECORDINGS_MAX_LIMIT,
@@ -898,3 +908,122 @@ export const JudgeSimpleSchema = z.object({
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
 }).strict();
 export type JudgeSimpleParams = z.infer<typeof JudgeSimpleSchema>;
+
+// ============================================================================
+// Agents Schemas
+// ============================================================================
+
+const AgentIdSchema = z.string().uuid().describe("Agent ID (UUID) from sixtydb_agents_list");
+const AgentLanguagesSchema = z.array(z.string().regex(/^[a-z]{2,3}$/, "Lowercase 2-3 letter code, e.g. 'en', 'hi' (no dialect tags)"))
+  .max(AGENT_MAX_LANGUAGES);
+
+const AgentToolSchema = z.object({
+  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, "Letters, digits, underscore; must not start with a digit")
+    .refine((n) => n !== "transfer_call" && n !== "forget_me", "Reserved tool name"),
+  description: z.string().min(1).max(AGENT_TOOL_DESCRIPTION_MAX_LENGTH),
+  parameters: z.object({ type: z.literal("object") }).passthrough()
+    .describe("JSON Schema for the tool arguments, type 'object', at most 4 KB of JSON")
+}).strict();
+
+const AgentCallSettingsShape = {
+  speaks_first: z.enum(["agent", "caller"]).optional().describe("Who speaks first when the call connects"),
+  start_delay_ms: z.number().int().min(0).max(10000).optional(),
+  idle_ms: z.number().int().min(1000).max(60000).nullable().optional().describe("Silence before the agent checks in"),
+  idle_checkins: z.number().int().min(0).max(5).optional(),
+  max_duration_secs: z.number().int().min(10).max(900).optional().describe("Hard call length limit in seconds (10-900)"),
+  record: z.boolean().optional().describe("Record the call (get recording consent where required by law)"),
+  voice_speed: z.number().min(0.5).max(2).nullable().optional(),
+  voice_stability: z.number().int().min(0).max(100).nullable().optional(),
+  voice_similarity: z.number().int().min(0).max(100).nullable().optional(),
+  speech_terms: z.array(z.string().min(1).max(80)).max(100).optional().describe("Words/names to recognize accurately")
+};
+
+const AgentCallDefaultsSchema = z.object(AgentCallSettingsShape).strict();
+
+const AgentWritableShape = {
+  greeting: z.string().max(AGENT_GREETING_MAX_LENGTH).nullable().optional().describe("Opening line spoken when the call connects"),
+  gender: z.enum(["female", "male"]).nullable().optional(),
+  listen_languages: AgentLanguagesSchema.optional().describe("Languages the agent understands, e.g. ['en','hi']"),
+  speak_languages: AgentLanguagesSchema.optional().describe("Languages the agent may speak"),
+  emotion: z.boolean().optional().describe("Expressive speech (default true)"),
+  tools: z.array(AgentToolSchema).max(AGENT_MAX_TOOLS).optional()
+    .describe("Functions the agent can call mid-call; requires tool_webhook_url"),
+  tool_webhook_url: z.string().url().max(2048).nullable().optional().describe("HTTPS endpoint that receives tool calls (required when tools are set)"),
+  event_webhook_url: z.string().url().max(2048).nullable().optional().describe("HTTPS endpoint for call.completed / call.failed / recording.ready events"),
+  knowledge_collection_id: z.string().uuid().nullable().optional().describe("Smart Memory workspace collection used as the agent's knowledge base"),
+  call_defaults: AgentCallDefaultsSchema.optional().describe("Default per-call settings; overridable per call")
+};
+
+export const AgentsListSchema = z.object({
+  limit: z.number().int().min(1).max(AGENT_LIST_MAX_LIMIT).default(AGENT_LIST_DEFAULT_LIMIT),
+  offset: z.number().int().min(0).default(DEFAULT_OFFSET),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsListParams = z.infer<typeof AgentsListSchema>;
+
+export const AgentsGetSchema = z.object({
+  agent_id: AgentIdSchema,
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsGetParams = z.infer<typeof AgentsGetSchema>;
+
+export const AgentsCreateSchema = z.object({
+  name: z.string().trim().min(1).max(AGENT_NAME_MAX_LENGTH).describe("Agent name, unique in the workspace"),
+  script: z.string().min(1).max(AGENT_SCRIPT_MAX_LENGTH).describe("System prompt: who the agent is and how it handles the call"),
+  voice_id: z.string().min(1).max(AGENT_VOICE_ID_MAX_LENGTH).describe("Voice ID (from the voices tools)"),
+  ...AgentWritableShape,
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsCreateParams = z.infer<typeof AgentsCreateSchema>;
+
+export const AgentsUpdateSchema = z.object({
+  agent_id: AgentIdSchema,
+  name: z.string().trim().min(1).max(AGENT_NAME_MAX_LENGTH).optional(),
+  script: z.string().min(1).max(AGENT_SCRIPT_MAX_LENGTH).optional(),
+  voice_id: z.string().min(1).max(AGENT_VOICE_ID_MAX_LENGTH).optional(),
+  ...AgentWritableShape,
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsUpdateParams = z.infer<typeof AgentsUpdateSchema>;
+
+export const AgentsDeleteSchema = z.object({
+  agent_id: AgentIdSchema,
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually delete. Deleting detaches the agent from its phone lines and cannot be undone."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsDeleteParams = z.infer<typeof AgentsDeleteSchema>;
+
+export const AgentsPlaceCallSchema = z.object({
+  agent_id: AgentIdSchema,
+  to: E164Schema.describe("Phone number to call, E.164 e.g. +14155551234"),
+  phone_line_id: z.string().uuid().describe("Phone line to call from (sixtydb_agents_list_phone_lines)"),
+  overrides: AgentCallDefaultsSchema.extend({
+    greeting: z.string().max(AGENT_GREETING_MAX_LENGTH).optional().describe("One-off greeting for this call")
+  }).strict().optional().describe("Per-call overrides of the agent's call_defaults"),
+  metadata: z.record(z.unknown()).optional().describe("Free-form JSON (max 4 KB) echoed back on the call and its events"),
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually place the call. This rings a real phone and spends AI credits and Dialer balance."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsPlaceCallParams = z.infer<typeof AgentsPlaceCallSchema>;
+
+export const AgentsListCallsSchema = z.object({
+  agent_id: AgentIdSchema.optional(),
+  status: z.enum(AGENT_CALL_STATUSES).optional(),
+  limit: z.number().int().min(1).max(AGENT_LIST_MAX_LIMIT).default(AGENT_LIST_DEFAULT_LIMIT),
+  offset: z.number().int().min(0).default(DEFAULT_OFFSET),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsListCallsParams = z.infer<typeof AgentsListCallsSchema>;
+
+export const AgentsCallIdSchema = z.object({
+  call_id: z.string().uuid().describe("Call ID from sixtydb_agents_place_call or sixtydb_agents_list_calls"),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsCallIdParams = z.infer<typeof AgentsCallIdSchema>;
+
+export const AgentsListPhoneLinesSchema = z.object({
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsListPhoneLinesParams = z.infer<typeof AgentsListPhoneLinesSchema>;

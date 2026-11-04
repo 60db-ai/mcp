@@ -4,7 +4,7 @@
 
 // Server identity
 export const SERVER_NAME = "60db-mcp-server";
-export const SERVER_VERSION = "2.2.0";
+export const SERVER_VERSION = "2.3.0";
 
 // API Configuration
 export const DEFAULT_API_BASE_URL = "https://api.60db.ai";
@@ -159,3 +159,15 @@ export const DIALER_RECORDINGS_MAX_LIMIT = 200;
 export const DIALER_RECORDINGS_DEFAULT_LIMIT = 25;
 export const DIALER_USAGE_MAX_LIMIT = 200;
 export const DIALER_USAGE_DEFAULT_LIMIT = 50;
+
+// Agents Limits (mirror the backend validation)
+export const AGENT_NAME_MAX_LENGTH = 64;
+export const AGENT_SCRIPT_MAX_LENGTH = 8000;
+export const AGENT_GREETING_MAX_LENGTH = 500;
+export const AGENT_VOICE_ID_MAX_LENGTH = 512;
+export const AGENT_MAX_LANGUAGES = 20;
+export const AGENT_MAX_TOOLS = 16;
+export const AGENT_TOOL_DESCRIPTION_MAX_LENGTH = 500;
+export const AGENT_LIST_DEFAULT_LIMIT = 20;
+export const AGENT_LIST_MAX_LIMIT = 100;
+export const AGENT_CALL_STATUSES = ["queued", "dialing", "in_progress", "completed", "failed"] as const;

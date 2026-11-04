@@ -170,8 +170,8 @@ export class QLabsApiClient {
   /**
    * Make a POST request
    */
-  public async post<T>(endpoint: string, data?: unknown): Promise<T> {
-    const response = await this.client.post<T>(endpoint, data);
+  public async post<T>(endpoint: string, data?: unknown, headers?: Record<string, string>): Promise<T> {
+    const response = await this.client.post<T>(endpoint, data, headers ? { headers } : undefined);
     return response.data;
   }
 
@@ -180,6 +180,14 @@ export class QLabsApiClient {
    */
   public async put<T>(endpoint: string, data?: unknown): Promise<T> {
     const response = await this.client.put<T>(endpoint, data);
+    return response.data;
+  }
+
+  /**
+   * Make a PATCH request
+   */
+  public async patch<T>(endpoint: string, data?: unknown): Promise<T> {
+    const response = await this.client.patch<T>(endpoint, data);
     return response.data;
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "60db-mcp-server",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "MCP server for the 60db platform — exposes TTS, STT, voice cloning, meetings, workspaces, billing, memory/RAG, authorization, AI music generation, dialer (SIP calling), and phone voice agents tools",
   "type": "module",
   "main": "dist/index.js",

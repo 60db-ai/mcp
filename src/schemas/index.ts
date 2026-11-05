@@ -935,8 +935,21 @@ const AgentCallSettingsShape = {
   voice_speed: z.number().min(0.5).max(2).nullable().optional(),
   voice_stability: z.number().int().min(0).max(100).nullable().optional(),
   voice_similarity: z.number().int().min(0).max(100).nullable().optional(),
-  speech_terms: z.array(z.string().min(1).max(80)).max(100).optional().describe("Words/names to recognize accurately")
+  speech_terms: z.array(z.string().min(1).max(80)).max(100).optional().describe("Words/names to recognize accurately"),
+  dtmf: z.boolean().optional().describe("Keypad tones: the agent can press and collect keys"),
+  latency_optimizer: z.boolean().optional().describe("Beta: the agent starts answering sooner, at a little more processing per reply")
 };
+
+const AgentSentimentsSchema = z.array(z.object({
+  name: z.string().min(1).max(40).regex(/^[A-Za-z][A-Za-z0-9 _-]*$/).describe("Label word, starts with a letter, not 'unknown'"),
+  description: z.string().max(200).optional().describe("What the label means, so the scorer can tell it apart")
+}).strict()).max(10).describe("Call sentiment labels, e.g. hot/warm/cold. Empty = defaults positive/negative/neutral");
+
+const AgentTransferTargetsSchema = z.array(z.object({
+  name: z.string().min(1).max(40).regex(/^[A-Za-z][A-Za-z0-9 _-]*$/)
+    .describe("Who the caller is put through to, e.g. 'Sales'. Becomes the agent's transfer_to_<name> function"),
+  numbers: z.array(E164Schema).min(1).max(10).describe("E.164 numbers, tried in turn (up to 3 per transfer)")
+}).strict()).max(10).describe("Call transfer destinations (max 10). [] turns call transfer off");
 
 const AgentCallDefaultsSchema = z.object(AgentCallSettingsShape).strict();
 
@@ -951,6 +964,8 @@ const AgentWritableShape = {
   tool_webhook_url: z.string().url().max(2048).nullable().optional().describe("HTTPS endpoint that receives tool calls (required when tools are set)"),
   event_webhook_url: z.string().url().max(2048).nullable().optional().describe("HTTPS endpoint for call.completed / call.failed / recording.ready events"),
   knowledge_collection_id: z.string().uuid().nullable().optional().describe("Smart Memory workspace collection used as the agent's knowledge base"),
+  sentiments: AgentSentimentsSchema.optional(),
+  transfer_targets: AgentTransferTargetsSchema.optional(),
   call_defaults: AgentCallDefaultsSchema.optional().describe("Default per-call settings; overridable per call")
 };
 
@@ -999,7 +1014,9 @@ export const AgentsPlaceCallSchema = z.object({
   to: E164Schema.describe("Phone number to call, E.164 e.g. +14155551234"),
   phone_line_id: z.string().uuid().describe("Phone line to call from (sixtydb_agents_list_phone_lines)"),
   overrides: AgentCallDefaultsSchema.extend({
-    greeting: z.string().max(AGENT_GREETING_MAX_LENGTH).optional().describe("One-off greeting for this call")
+    greeting: z.string().max(AGENT_GREETING_MAX_LENGTH).optional().describe("One-off greeting for this call"),
+    sentiments: AgentSentimentsSchema.optional(),
+    transfer_targets: AgentTransferTargetsSchema.optional()
   }).strict().optional().describe("Per-call overrides of the agent's call_defaults"),
   metadata: z.record(z.unknown()).optional().describe("Free-form JSON (max 4 KB) echoed back on the call and its events"),
   confirm: z.boolean().default(false)
@@ -1008,9 +1025,24 @@ export const AgentsPlaceCallSchema = z.object({
 }).strict();
 export type AgentsPlaceCallParams = z.infer<typeof AgentsPlaceCallSchema>;
 
+export const AgentsStartStreamCallSchema = z.object({
+  agent_id: AgentIdSchema,
+  overrides: AgentCallDefaultsSchema.extend({
+    greeting: z.string().max(AGENT_GREETING_MAX_LENGTH).optional().describe("One-off greeting for this call"),
+    sentiments: AgentSentimentsSchema.optional(),
+    transfer_targets: AgentTransferTargetsSchema.optional()
+  }).strict().optional().describe("Per-call overrides of the agent's call_defaults"),
+  metadata: z.record(z.unknown()).optional().describe("Free-form JSON (max 4 KB) echoed back on the call and its events"),
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually start the call. It spends AI credits once audio is streamed to the returned URL."),
+  response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
+}).strict();
+export type AgentsStartStreamCallParams = z.infer<typeof AgentsStartStreamCallSchema>;
+
 export const AgentsListCallsSchema = z.object({
   agent_id: AgentIdSchema.optional(),
   status: z.enum(AGENT_CALL_STATUSES).optional(),
+  direction: z.enum(["outbound", "inbound", "web", "stream"]).optional().describe("Filter by type: phone (outbound/inbound), browser (web) or WebSocket (stream)"),
   limit: z.number().int().min(1).max(AGENT_LIST_MAX_LIMIT).default(AGENT_LIST_DEFAULT_LIMIT),
   offset: z.number().int().min(0).default(DEFAULT_OFFSET),
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)

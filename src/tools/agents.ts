@@ -24,6 +24,7 @@ import {
   AgentsUpdateSchema,
   AgentsDeleteSchema,
   AgentsPlaceCallSchema,
+  AgentsStartStreamCallSchema,
   AgentsListCallsSchema,
   AgentsCallIdSchema,
   AgentsListPhoneLinesSchema,
@@ -33,6 +34,7 @@ import {
   AgentsUpdateParams,
   AgentsDeleteParams,
   AgentsPlaceCallParams,
+  AgentsStartStreamCallParams,
   AgentsListCallsParams,
   AgentsCallIdParams,
   AgentsListPhoneLinesParams,
@@ -127,6 +129,8 @@ function agentDetail(a: any): string {
     tool_webhook_url: a.tool_webhook_url,
     event_webhook_url: a.event_webhook_url,
     knowledge_collection_id: a.knowledge_collection_id,
+    sentiments: a.sentiments?.length ? a.sentiments.map((s: any) => s.name).join(", ") : undefined,
+    transfer_targets: a.transfer_targets?.length ? a.transfer_targets.map((t: any) => `${t.name} (${(t.numbers || []).length} number${(t.numbers || []).length === 1 ? "" : "s"})`).join(", ") : undefined,
     call_defaults: a.call_defaults && Object.keys(a.call_defaults).length ? a.call_defaults : undefined,
     created_at: a.created_at,
     updated_at: a.updated_at,
@@ -157,10 +161,12 @@ function callDetail(c: any): string {
   return `### Call \`${c.id}\`\n` + fmtRow({
     agent: c.agent_name ? `${c.agent_name} (${c.agent_id})` : c.agent_id,
     phone_line_id: c.phone_line_id,
-    direction: c.direction, status: c.status, reason: c.reason,
+    direction: c.direction, sentiment: c.sentiment, status: c.status, reason: c.reason,
     to: c.to, from: c.from, duration_secs: c.duration_secs,
     started_at: c.started_at, connected_at: c.connected_at, ended_at: c.ended_at,
     recorded: c.record, has_recording: c.has_recording, has_transcript: c.has_transcript,
+    answer_delay_p50_ms: c.analytics?.latency?.p50_ms, interruptions: c.analytics?.interruptions?.talked_over,
+    transfer: c.analytics?.transfer?.outcome, packet_loss_percent: c.analytics?.network?.caller?.loss_percent,
     runtime_cost_usd: c.cost?.runtime_usd, runtime_billing_status: c.cost?.runtime_billing_status,
     source: c.source,
     metadata: c.metadata && Object.keys(c.metadata).length ? c.metadata : undefined,
@@ -230,7 +236,7 @@ export function registerAgentsTools(server: McpServer): void {
       description: `Create a phone voice agent.
 
 **Required:** \`name\` (unique, max 64), \`script\` (system prompt, max 8000), \`voice_id\`.
-**Optional:** greeting, gender, listen_languages / speak_languages (lowercase codes like "en","hi"), emotion, tools (max 16, need \`tool_webhook_url\`), event_webhook_url, knowledge_collection_id (Smart Memory workspace collection), call_defaults.
+**Optional:** greeting, gender, listen_languages / speak_languages (lowercase codes like "en","hi"), emotion, tools (max 16, need \`tool_webhook_url\`), event_webhook_url, knowledge_collection_id (Smart Memory workspace collection), sentiments (call labels like hot/warm/cold, each {name, description}; omit for positive/negative/neutral; a finished call gets one label in its sentiment field), transfer_targets (call transfer: [{name: "Sales", numbers: ["+91…"]}], max 10; the agent offers transfer_to_<name> and rings the numbers in turn), call_defaults.
 
 **Returns:** the agent plus a \`webhook_secret\` shown **only once**. Store it: it verifies the \`x-60db-signature\` on tool and event webhooks sent to your server.`,
       inputSchema: AgentsCreateSchema,
@@ -345,6 +351,46 @@ export function registerAgentsTools(server: McpServer): void {
     }
   );
 
+  // ── sixtydb_agents_start_stream_call ───────────────────
+  server.registerTool(
+    "sixtydb_agents_start_stream_call",
+    {
+      title: "Start an agent call over a WebSocket",
+      description: `Start a call whose audio is a **WebSocket** instead of a phone line (a PBX, Twilio/Exotel/Klicko media stream, or an app). No phone rings.
+
+**Costs:** AI credits for speech/LLM once audio is streamed. No Dialer balance or phone line. Requires an active plan. Up to 3 at once per workspace.
+
+**Params:** \`agent_id\`, optional \`overrides\` (call_defaults + one-off greeting) and \`metadata\`.
+- \`confirm\` (boolean, default false): **Without \`confirm: true\` this tool starts nothing and only explains what will happen.**
+
+**Returns:** the call and a one-time \`wss://api.60db.ai/ws/agents/stream/…?token=…\` URL (single use, valid 55 s, no API key in it). Whatever streams the audio connects to it and, within 10 s, sends \`{"event":"start","format":"mulaw"}\` (then binary 20 ms frames of 8 kHz audio) or Twilio Media Streams \`connected\` + \`start\` with \`mediaFormat\` (then base64 \`media\` events). Read the result later with sixtydb_agents_get_call.`,
+      inputSchema: AgentsStartStreamCallSchema,
+      annotations: { title: "Start stream call", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async (params: AgentsStartStreamCallParams) => {
+      if (params.confirm !== true) {
+        return errorResult(
+          `**Confirmation required - no call was started.**\n\n` +
+          `Starting a stream call for agent \`${params.agent_id}\` will:\n` +
+          `- return a one-time WebSocket URL (valid 55 s); the agent talks to whatever audio is streamed to it\n` +
+          `- bill AI credits for speech/LLM while it runs (no phone line, no Dialer charge)\n\n` +
+          `Call this tool again with \`confirm: true\` to proceed.`
+        );
+      }
+      try {
+        const { agent_id, confirm: _confirm, response_format, ...body } = params;
+        const res = await api().post<any>(`/agents/${agent_id}/stream-calls`, body, { "x-60db-client": "mcp" });
+        const d = res.data || res;
+        return respond(`**Stream call started**\n\n` + callDetail(d.call) +
+          `\n\n**WebSocket URL** (single use, ${d.expires_in}s):\n\`${d.url}\`\n\n` +
+          `Connect and send \`{"event":"start","format":"mulaw"}\` (or Twilio-style \`connected\` + \`start\`) within 10 s.`,
+          res, response_format);
+      } catch (error) {
+        return handleAgentsError(error);
+      }
+    }
+  );
+
   // ── sixtydb_agents_list_calls ──────────────────────────
   server.registerTool(
     "sixtydb_agents_list_calls",
@@ -359,6 +405,7 @@ export function registerAgentsTools(server: McpServer): void {
         const query: Record<string, unknown> = { limit: params.limit, offset: params.offset };
         if (params.agent_id) query.agent_id = params.agent_id;
         if (params.status) query.status = params.status;
+        if (params.direction) query.direction = params.direction;
         const res = await api().get<any>("/agents/calls", query);
         const d = res.data || res;
         const calls: any[] = d.calls || [];

@@ -162,7 +162,7 @@ export const DIALER_USAGE_DEFAULT_LIMIT = 50;
 
 // Agents Limits (mirror the backend validation)
 export const AGENT_NAME_MAX_LENGTH = 64;
-export const AGENT_SCRIPT_MAX_LENGTH = 8000;
+export const AGENT_SCRIPT_MAX_LENGTH = 32000;
 export const AGENT_GREETING_MAX_LENGTH = 500;
 export const AGENT_VOICE_ID_MAX_LENGTH = 512;
 export const AGENT_MAX_LANGUAGES = 20;

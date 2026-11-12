@@ -171,3 +171,9 @@ export const AGENT_TOOL_DESCRIPTION_MAX_LENGTH = 500;
 export const AGENT_LIST_DEFAULT_LIMIT = 20;
 export const AGENT_LIST_MAX_LIMIT = 100;
 export const AGENT_CALL_STATUSES = ["queued", "dialing", "in_progress", "completed", "failed"] as const;
+
+// Call analysis (analyzers) limits (mirror the backend validation)
+export const CALL_ANALYSIS_MAX_URLS_PER_CALL = 50;
+export const CALL_ANALYSIS_MAX_LIMIT = 100;
+export const CALL_ANALYSIS_DEFAULT_LIMIT = 50;
+export const CALL_ANALYSIS_FETCH_BATCH_SIZE = 10;

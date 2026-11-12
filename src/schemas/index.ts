@@ -8,6 +8,9 @@ import {
   DEFAULT_LIMIT,
   MAX_LIMIT,
   DEFAULT_OFFSET,
+  CALL_ANALYSIS_MAX_URLS_PER_CALL,
+  CALL_ANALYSIS_MAX_LIMIT,
+  CALL_ANALYSIS_DEFAULT_LIMIT,
   TTS_MAX_TEXT_LENGTH,
   TTS_MIN_SPEED,
   TTS_MAX_SPEED,
@@ -1059,3 +1062,134 @@ export const AgentsListPhoneLinesSchema = z.object({
   response_format: ResponseFormatSchema.default(ResponseFormat.MARKDOWN)
 }).strict();
 export type AgentsListPhoneLinesParams = z.infer<typeof AgentsListPhoneLinesSchema>;
+
+// ─ Call analysis (analyzers) ───────────────────────────────
+
+const CallAnalysisAgentIdSchema = z.string().uuid().describe("Analyzer ID (UUID) from sixtydb_call_analysis_list_analyzers");
+const CallAnalysisCallIdSchema = z.string().uuid().describe("Call ID (UUID) from sixtydb_call_analysis_list_recordings (call_id)");
+const CallAnalysisFormat = ResponseFormatSchema.default(ResponseFormat.MARKDOWN);
+const CallAnalysisDaysSchema = z.union([z.literal(7), z.literal(30), z.literal(90)]).default(30)
+  .describe("Look-back window in days: 7, 30 or 90");
+
+const CallAnalysisWritableShape = {
+  name: z.string().trim().min(1).max(120).describe("Analyzer name"),
+  instructions: z.string().trim().min(1).max(20000).describe("What to check for in each call (the analysis brief)"),
+  description: z.string().max(1000).nullable().optional().describe("Short description"),
+  knowledge_collection_id: z.string().uuid().nullable().optional().describe("Knowledge collection to ground the analysis (must be visible to the workspace owner)"),
+  key_terms: z.array(z.string().min(1).max(60)).max(200).optional().describe("Domain terms to help transcription"),
+  language: z.string().max(20).nullable().optional().describe("Call language, e.g. en"),
+};
+
+export const CallAnalysisListAnalyzersSchema = z.object({
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisListAnalyzersParams = z.infer<typeof CallAnalysisListAnalyzersSchema>;
+
+export const CallAnalysisCreateAnalyzerSchema = z.object({
+  ...CallAnalysisWritableShape,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisCreateAnalyzerParams = z.infer<typeof CallAnalysisCreateAnalyzerSchema>;
+
+export const CallAnalysisGetAnalyzerSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisGetAnalyzerParams = z.infer<typeof CallAnalysisGetAnalyzerSchema>;
+
+export const CallAnalysisUpdateAnalyzerSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  name: CallAnalysisWritableShape.name.optional(),
+  instructions: CallAnalysisWritableShape.instructions.optional(),
+  description: CallAnalysisWritableShape.description,
+  knowledge_collection_id: CallAnalysisWritableShape.knowledge_collection_id,
+  key_terms: CallAnalysisWritableShape.key_terms,
+  language: CallAnalysisWritableShape.language,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisUpdateAnalyzerParams = z.infer<typeof CallAnalysisUpdateAnalyzerSchema>;
+
+export const CallAnalysisArchiveAnalyzerSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  confirm: z.boolean().default(false)
+    .describe("Must be true to actually archive. The analyzer stops watching call agents; calls and recordings are kept."),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisArchiveAnalyzerParams = z.infer<typeof CallAnalysisArchiveAnalyzerSchema>;
+
+export const CallAnalysisAddRecordingUrlsSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  urls: z.array(z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), "Only http(s) URLs"))
+    .min(1).max(CALL_ANALYSIS_MAX_URLS_PER_CALL)
+    .describe(`Public http(s) URLs of call recordings (audio/mpeg, wav, m4a, mp4, ogg, flac, webm; max 100 MiB each). 1-${CALL_ANALYSIS_MAX_URLS_PER_CALL} per call.`),
+  name: z.string().trim().min(1).max(200).optional().describe("Batch label"),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisAddRecordingUrlsParams = z.infer<typeof CallAnalysisAddRecordingUrlsSchema>;
+
+export const CallAnalysisAnalyzeSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  confirm_count: z.number().int().min(0).optional()
+    .describe("Number of ready recordings you agree to analyze (shown by the preview). Omit to only preview; analysis spends credits."),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisAnalyzeParams = z.infer<typeof CallAnalysisAnalyzeSchema>;
+
+export const CallAnalysisListRecordingsSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  status: z.enum(["uploading", "ready", "waiting", "transcribing", "analyzing", "done", "failed", "cancelled"]).optional(),
+  category: z.enum(["wrong_information", "missed_step", "compliance", "customer_unresolved", "behaviour", "other"]).optional(),
+  severity: z.enum(["high", "medium", "low"]).optional(),
+  q: z.string().max(200).optional().describe("Search title / person"),
+  limit: z.number().int().min(1).max(CALL_ANALYSIS_MAX_LIMIT).default(CALL_ANALYSIS_DEFAULT_LIMIT),
+  offset: z.number().int().min(0).default(DEFAULT_OFFSET),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisListRecordingsParams = z.infer<typeof CallAnalysisListRecordingsSchema>;
+
+const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/, "ISO date, e.g. 2026-11-01");
+
+export const CallAnalysisGetProblemsSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema,
+  from: IsoDateSchema.optional(),
+  to: IsoDateSchema.optional(),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisGetProblemsParams = z.infer<typeof CallAnalysisGetProblemsSchema>;
+
+export const CallAnalysisGetAnalyticsSchema = z.object({
+  agent_id: CallAnalysisAgentIdSchema.optional()
+    .describe("Analyzer ID. Omit for the workspace-wide overview across all analyzers."),
+  days: CallAnalysisDaysSchema,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisGetAnalyticsParams = z.infer<typeof CallAnalysisGetAnalyticsSchema>;
+
+export const CallAnalysisGetCallAnalysisSchema = z.object({
+  call_id: CallAnalysisCallIdSchema,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisGetCallAnalysisParams = z.infer<typeof CallAnalysisGetCallAnalysisSchema>;
+
+export const CallAnalysisSuggestAgentFixSchema = z.object({
+  call_id: CallAnalysisCallIdSchema,
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisSuggestAgentFixParams = z.infer<typeof CallAnalysisSuggestAgentFixSchema>;
+
+export const CallAnalysisApplyAgentFixSchema = z.object({
+  call_id: CallAnalysisCallIdSchema,
+  base_hash: z.string().regex(/^[0-9a-f]{64}$/i, "64 hex characters").describe("base_hash returned by sixtydb_call_analysis_suggest_agent_fix"),
+  script: z.string().min(1).max(AGENT_SCRIPT_MAX_LENGTH).describe("The new agent script to save (normally the suggestion's `after`, optionally edited)"),
+  confirm: z.boolean().default(false).describe("Must be true to overwrite the agent's script. The previous script is kept and can be restored with undo."),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisApplyAgentFixParams = z.infer<typeof CallAnalysisApplyAgentFixSchema>;
+
+export const CallAnalysisUndoAgentFixSchema = z.object({
+  call_id: CallAnalysisCallIdSchema,
+  fix_id: z.string().uuid().describe("fix_id returned by sixtydb_call_analysis_apply_agent_fix"),
+  confirm: z.boolean().default(false).describe("Must be true to restore the previous agent script."),
+  response_format: CallAnalysisFormat
+}).strict();
+export type CallAnalysisUndoAgentFixParams = z.infer<typeof CallAnalysisUndoAgentFixSchema>;

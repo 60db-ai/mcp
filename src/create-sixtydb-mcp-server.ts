@@ -20,6 +20,7 @@ import { registerAuthzTools } from "./tools/authz.js";
 import { registerMusicTools } from "./tools/music.js";
 import { registerDialerTools } from "./tools/dialer.js";
 import { registerAgentsTools } from "./tools/agents.js";
+import { registerCallAnalysisTools } from "./tools/call-analysis.js";
 
 export interface CreateServerOptions {
   /**
@@ -50,6 +51,7 @@ export function createSixtydbMcpServer(options: CreateServerOptions = {}): McpSe
   registerMusicTools(server, { allowLocalFiles });
   registerDialerTools(server);
   registerAgentsTools(server);
+  registerCallAnalysisTools(server);
 
   return server;
 }

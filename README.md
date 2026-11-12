@@ -14,6 +14,7 @@ Model Context Protocol (MCP) server for the 60db Voice AI Platform. This server 
 - **Billing**: View plans, subscriptions, and invoices
 - **Music**: Generate AI songs from a prompt or lyrics, poll status, download MP3s, browse voices
 - **Dialer**: Manage SIP phone numbers, caller ID, call history, recordings, and billing usage
+- **Call analysis**: Create analyzers, add call recordings by URL, run analysis, read problems/analytics, and fix AI agents
 
 ## Hosted server (recommended)
 
@@ -157,6 +158,22 @@ MCP_URL=https://mcp.60db.ai/mcp SIXTYDB_API_KEY=sk_live_... node scripts/smoke-t
 - `sixtydb_dialer_get_recording_transcript` - Get (or generate) a recording transcript
 - `sixtydb_dialer_get_usage` - Combined billing usage + active number subscriptions
 - `sixtydb_dialer_get_balance` - Dialer's separate prepaid balance (USD), pay-as-you-go rates, and ledger — independent of AI credits
+
+#### Call analysis
+- `sixtydb_call_analysis_list_analyzers` - List analyzers
+- `sixtydb_call_analysis_create_analyzer` - Create an analyzer (name + instructions)
+- `sixtydb_call_analysis_get_analyzer` - Get an analyzer with its recording counts
+- `sixtydb_call_analysis_update_analyzer` - Update an analyzer (new version when text changes)
+- `sixtydb_call_analysis_archive_analyzer` - Archive an analyzer (requires `confirm: true`; calls and recordings are kept)
+- `sixtydb_call_analysis_add_recording_urls` - Add recordings from public URLs (batch + server-side download); starts no analysis, costs nothing
+- `sixtydb_call_analysis_analyze` - Analyze all ready recordings. **Costs credits**: preview first, then pass `confirm_count`
+- `sixtydb_call_analysis_list_recordings` - List recordings with status/verdict (filters: status, category, severity, q)
+- `sixtydb_call_analysis_get_problems` - Problems summary: by category, by severity, top recurring problems
+- `sixtydb_call_analysis_get_analytics` - Analyzer charts data, or the workspace overview when `agent_id` is omitted
+- `sixtydb_call_analysis_get_call_analysis` - Full analysis of one call (transcript, findings, evidence)
+- `sixtydb_call_analysis_suggest_agent_fix` - Suggest improved AI-agent instructions for a call with problems (saves nothing; needs the key's `agents` permission)
+- `sixtydb_call_analysis_apply_agent_fix` - Apply a suggested script (requires `confirm: true`; needs the key's `agents` permission)
+- `sixtydb_call_analysis_undo_agent_fix` - Restore the previous agent script (requires `confirm: true`; needs the key's `agents` permission)
 
 #### Judge
 - `sixtydb_judge_evaluate` - Score content against a rubric of choice/score/noul questions (inline or saved `rubric_id`)

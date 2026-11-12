@@ -576,3 +576,12 @@ For testing issues:
 3. Test with MCP Inspector first
 4. Review API credentials
 5. Contact QLabs support: support@qlabs.com
+
+## Offline smoke tests
+
+No network or API key needed. Build first (`npm run build`), then:
+
+```bash
+npm run test:call-analysis                          # Call analysis tools
+node scripts/smoke-test-agents-tools-offline.mjs    # Agents tools
+```

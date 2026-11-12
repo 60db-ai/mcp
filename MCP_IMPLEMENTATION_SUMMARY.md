@@ -29,7 +29,8 @@ qlabs-mcp-server/
 │       ├── memory.ts         # Memory / RAG tools (9 tools)
 │       ├── authz.ts          # Authorization (Cerbos) tools (2 tools)
 │       ├── music.ts          # AI music generation tools (6 tools)
-│       └── dialer.ts         # Dialer (SIP calling) tools (12 tools)
+│       ├── dialer.ts         # Dialer (SIP calling) tools (12 tools)
+│       └── call-analysis.ts  # Call analysis (analyzers) tools (14 tools)
 ├── dist/                     # Built JavaScript files
 ├── package.json              # Project metadata and dependencies
 ├── tsconfig.json             # TypeScript configuration
@@ -125,6 +126,24 @@ qlabs-mcp-server/
 56. `sixtydb_dialer_get_recording_url` - Short-lived recording playback URL
 57. `sixtydb_dialer_get_recording_transcript` - Get/generate a recording transcript
 58. `sixtydb_dialer_get_usage` - Combined billing usage + subscriptions
+
+### Call analysis (14 tools)
+- `sixtydb_call_analysis_list_analyzers` - List analyzers
+- `sixtydb_call_analysis_create_analyzer` - Create an analyzer (name + instructions)
+- `sixtydb_call_analysis_get_analyzer` - Get an analyzer with its recording counts
+- `sixtydb_call_analysis_update_analyzer` - Update an analyzer (new version when text changes)
+- `sixtydb_call_analysis_archive_analyzer` - Archive an analyzer (requires `confirm: true`; calls and recordings are kept)
+- `sixtydb_call_analysis_add_recording_urls` - Add recordings from public URLs (batch + server-side download); starts no analysis, costs nothing
+- `sixtydb_call_analysis_analyze` - Analyze all ready recordings. **Costs credits**: preview first, then pass `confirm_count`
+- `sixtydb_call_analysis_list_recordings` - List recordings with status/verdict (filters: status, category, severity, q)
+- `sixtydb_call_analysis_get_problems` - Problems summary: by category, by severity, top recurring problems
+- `sixtydb_call_analysis_get_analytics` - Analyzer charts data, or the workspace overview when `agent_id` is omitted
+- `sixtydb_call_analysis_get_call_analysis` - Full analysis of one call (transcript, findings, evidence)
+- `sixtydb_call_analysis_suggest_agent_fix` - Suggest improved AI-agent instructions for a call with problems (saves nothing; needs the key's `agents` permission)
+- `sixtydb_call_analysis_apply_agent_fix` - Apply a suggested script (requires `confirm: true`; needs the key's `agents` permission)
+- `sixtydb_call_analysis_undo_agent_fix` - Restore the previous agent script (requires `confirm: true`; needs the key's `agents` permission)
+
+These use only the `/deep-analytics` routes open to user API keys, so they work with an `sk_` key and with OAuth sign-in.
 
 ## Key Features
 

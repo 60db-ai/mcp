@@ -160,6 +160,8 @@ MCP_URL=https://mcp.60db.ai/mcp SIXTYDB_API_KEY=sk_live_... node scripts/smoke-t
 - `sixtydb_dialer_get_balance` - Dialer's separate prepaid balance (USD), pay-as-you-go rates, and ledger — independent of AI credits
 
 #### Call analysis
+The API key needs the **Call analysis** permission (new keys have it; for older keys switch it on in Developers → API keys, otherwise tools return `DA_API_KEY_SCOPE_MISSING`).
+
 - `sixtydb_call_analysis_list_analyzers` - List analyzers
 - `sixtydb_call_analysis_create_analyzer` - Create an analyzer (name + instructions)
 - `sixtydb_call_analysis_get_analyzer` - Get an analyzer with its recording counts

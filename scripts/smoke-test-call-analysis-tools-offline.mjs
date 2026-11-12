@@ -131,6 +131,14 @@ api.getAxiosInstance().defaults.adapter = async (config) => {
 r = await call("suggest_agent_fix", { call_id: C });
 check(/POLICY_DENY/.test(text(r)) && /agents. permission/.test(text(r)), "403 POLICY_DENY maps to the agents-permission hint");
 
+api.getAxiosInstance().defaults.adapter = async (config) => {
+  const e = new Error("403"); e.isAxiosError = true; e.config = config;
+  e.response = { status: 403, data: { message: "Forbidden", code: "DA_API_KEY_SCOPE_MISSING" }, headers: {}, config };
+  throw e;
+};
+r = await call("list_analyzers", {});
+check(/DA_API_KEY_SCOPE_MISSING/.test(text(r)) && /Enable the Call analysis permission/.test(text(r)) && /Developers/.test(text(r)), "403 DA_API_KEY_SCOPE_MISSING maps to the enable-permission hint");
+
 await client.close();
 console.log(failed ? `\n${failed} check(s) failed` : "\nAll checks passed");
 process.exit(failed ? 1 : 0);

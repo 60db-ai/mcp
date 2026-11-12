@@ -14,6 +14,7 @@
  * Safety rules enforced here:
  *   - Analysis spends credits (speech-to-text + model), so it needs the exact
  *     confirm_count shown by the preview. Archive, apply and undo need confirm:true.
+ *   - Every route needs the key's `call_analysis` permission (otherwise 403 DA_API_KEY_SCOPE_MISSING).
  *   - Fix agent tools need the key's `agents` permission (otherwise 403 POLICY_DENY).
  *   - Local file upload is not exposed; recordings are added by public URL only.
  */
@@ -78,6 +79,7 @@ const unwrap = (res: any): any => (res && typeof res === "object" && "data" in r
 const ERROR_HINTS: Record<string, string> = {
   DA_API_KEY_DENIED: "This API key cannot use that route. Only Call analysis analyzer routes are open to API keys.",
   DA_API_KEY_RATE_LIMITED: "Too many Call analysis requests for this key. Wait a minute and retry.",
+  DA_API_KEY_SCOPE_MISSING: "Enable the Call analysis permission on this API key in the 60db dashboard: Developers → API keys.",
   AGENT_FIX_RATE_LIMITED: "Fix agent is limited to 10 requests per minute. Wait and retry.",
   POLICY_DENY: "Permission denied. The key owner needs access to this analyzer. Fix agent tools also need the API key's `agents` permission (enable it in the 60db app, API keys).",
   DA_MEMBERSHIP_REQUIRED: "The workspace owner has no active membership in this workspace.",

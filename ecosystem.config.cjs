@@ -27,15 +27,15 @@ module.exports = {
         NODE_ENV: "development",
         HOST: "127.0.0.1",
         PORT: 8787,
-        SIXTYDB_API_BASE_URL: "http://localhost:4000",
+        SIXTYDB_API_BASE_URL: "https://api.60db.ai",
         PUBLIC_MCP_URL: "http://localhost:8787/mcp",
       },
       env_production: {
         NODE_ENV: "production",
         HOST: "127.0.0.1",
         PORT: 8787,
-        // Same box as api.60db.ai: call the API on loopback, skip TLS + nginx hop.
-        SIXTYDB_API_BASE_URL: "http://127.0.0.1:4000",
+        // Call the public API (the loopback API on :4000 is no longer running).
+        SIXTYDB_API_BASE_URL: "https://api.60db.ai",
         PUBLIC_MCP_URL: "https://mcp.60db.ai/mcp",
         // OAuth secrets are NOT set here: put MCP_OAUTH_SECRET (>= 32 random chars) and
         // optionally GOOGLE_CLIENT_ID in ~/60db-mcp/.env (gitignored), loaded at startup.
